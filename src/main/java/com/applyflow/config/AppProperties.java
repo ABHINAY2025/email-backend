@@ -46,7 +46,8 @@ public record AppProperties(
                        @DefaultValue("3") int executorThreads) {
     }
 
-    public record Cors(@DefaultValue({"http://localhost:5173", "http://localhost:3000"}) List<String> allowedOrigins) {
+    public record Cors(@DefaultValue({"http://localhost:5173", "http://localhost:3000"}) List<String> allowedOrigins,
+                       @DefaultValue("https://email-frontend-*.vercel.app") List<String> allowedOriginPatterns) {
     }
 
     public record Intelligence(@DefaultValue("rules") String provider) {

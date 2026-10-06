@@ -101,9 +101,10 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource(AppProperties props) {
         CorsConfiguration config = new CorsConfiguration();
-        List<String> origins = props.cors() == null || props.cors().allowedOrigins() == null ? List.of()
-                : props.cors().allowedOrigins().stream().map(String::trim).filter(s -> !s.isEmpty()).toList();
-        config.setAllowedOrigins(origins);
+        config.setAllowedOrigins(cleanOrigins(props.cors() == null ? null : props.cors().allowedOrigins()));
+        // Patterns cover hosts with generated names, e.g. Vercel production + preview URLs of the frontend.
+        config.setAllowedOriginPatterns(cleanOrigins(props.cors() == null ? null
+                : props.cors().allowedOriginPatterns()));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Content-Type", "X-XSRF-TOKEN", "X-Requested-With", "Accept",
                 "Cache-Control", "Last-Event-ID"));
@@ -112,5 +113,11 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", config);
         return source;
+    }
+
+    /** Trims entries and drops a trailing "/" (a browser Origin never has one, so it would never match). */
+    private static List<String> cleanOrigins(List<String> values) {
+        return values == null ? List.of() : values.stream().map(String::trim).map(s -> s.replaceAll("/+$", ""))
+                .filter(s -> !s.isEmpty()).toList();
     }
 }
