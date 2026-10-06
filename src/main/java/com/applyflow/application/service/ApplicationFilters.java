@@ -24,7 +24,8 @@ public final class ApplicationFilters {
     private ApplicationFilters() {
     }
 
-    public static Criteria build(ApplicationQuery f, ZoneId zone, MongoOperations ops) {
+    /** Filter criteria for the user's applications (the repository adds the owner filter to the main query). */
+    public static Criteria build(Long userId, ApplicationQuery f, ZoneId zone, MongoOperations ops) {
         List<Criteria> p = new ArrayList<>();
         p.add(where("archived").is(f.archived()));
 
@@ -57,7 +58,7 @@ public final class ApplicationFilters {
             p.add(where("jobTitle").regex(contains(f.jobTitle()), "i"));
         }
         if (notBlank(f.q())) {
-            p.add(text(f.q(), ops));
+            p.add(text(userId, f.q(), ops));
         }
         return new Criteria().andOperator(p);
     }
@@ -66,12 +67,12 @@ public final class ApplicationFilters {
      * Free text: company name, title, location, recruiter, reference, display id ("AF-12") or the subject of a linked
      * email.
      */
-    private static Criteria text(String raw, MongoOperations ops) {
+    private static Criteria text(Long userId, String raw, MongoOperations ops) {
         String q = raw.trim();
         String regex = contains(q);
         List<Criteria> or = new ArrayList<>();
 
-        Query companies = query(where("name").regex(regex, "i"));
+        Query companies = query(where("userId").is(userId).and("name").regex(regex, "i"));
         companies.fields().include("_id");
         List<Long> companyIds = ops.find(companies, Company.class).stream().map(Company::getId).toList();
         if (!companyIds.isEmpty()) {
@@ -87,7 +88,8 @@ public final class ApplicationFilters {
             or.add(where("_id").is(id));
         }
         List<Long> bySubject = ops.findDistinct(
-                query(where("applicationId").ne(null).and("subject").regex(regex, "i")), "applicationId",
+                query(where("userId").is(userId).and("applicationId").ne(null).and("subject").regex(regex, "i")),
+                "applicationId",
                 EmailMessage.class, Long.class);
         if (!bySubject.isEmpty()) {
             or.add(where("_id").in(bySubject));

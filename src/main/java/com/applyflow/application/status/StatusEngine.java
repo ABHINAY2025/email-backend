@@ -78,7 +78,7 @@ public class StatusEngine {
         }
 
         notifyChange(app, from, target, actor, emailId, when);
-        events.publish(ServerEventPublisher.STATUS_CHANGED, new StatusChangedPayload(app.getId(),
+        events.publish(app.getUserId(), ServerEventPublisher.STATUS_CHANGED, new StatusChangedPayload(app.getId(),
                 app.getCompany().getName(), app.getJobTitle(), from, target, actor));
         return new Change(from, target);
     }
@@ -129,7 +129,8 @@ public class StatusEngine {
         };
         String message = title + ": " + (from == null ? "" : from.label() + " → ") + to.label()
                 + (actor == Actor.USER ? " (updated by you)" : "");
-        notificationService.create(type, headline, message, app.getId(), emailId, at.isAfter(Instant.now()) ? null : at);
+        notificationService.create(app.getUserId(), type, headline, message, app.getId(), emailId,
+                at.isAfter(Instant.now()) ? null : at);
     }
 
     public static String stageFor(ApplicationStatus s) {

@@ -15,15 +15,17 @@ import com.applyflow.repository.EmailAccountRepository;
 import com.applyflow.repository.EmailMessageRepository;
 import com.applyflow.repository.NotificationRepository;
 import com.applyflow.repository.SyncJobRepository;
+import com.applyflow.security.CurrentUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoOperations;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.springframework.data.mongodb.core.query.Criteria.where;
+import static org.springframework.data.mongodb.core.query.Query.query;
 
+/** Privacy actions; each one only ever touches the current user's data. */
 @Service
 public class PrivacyService {
 
@@ -52,51 +54,54 @@ public class PrivacyService {
         this.mongo = mongo;
     }
 
-    /** A sync running during a wipe would keep writing into half-deleted data. */
-    private void requireNoSync() {
-        if (syncService.isAnyRunning()) {
+    /** A sync of one of the user's mailboxes running during a wipe would keep writing into half-deleted data. */
+    private void requireNoSync(Long userId) {
+        if (syncService.isAnyRunningFor(userId)) {
             throw new ConflictException("A mail sync is running. Wait for it to finish, then try again.");
         }
     }
 
-    /** Deletes all emails and email-derived events; applications are kept; cursors reset. */
+    /** Deletes all of the user's emails and email-derived events; applications are kept; cursors reset. */
     @Transactional
     public void clearImportedMail() {
-        requireNoSync();
-        eventRepository.deleteEmailDerived();
-        notificationRepository.deleteEmailLinked();
-        emailRepository.deleteAllBulk();
-        accountRepository.resetAllCursors();
-        log.info("Privacy: cleared all imported mail");
+        Long userId = CurrentUser.id();
+        requireNoSync(userId);
+        eventRepository.deleteEmailDerived(userId);
+        notificationRepository.deleteEmailLinked(userId);
+        emailRepository.deleteAllBulk(userId);
+        accountRepository.resetAllCursors(userId);
+        log.info("Privacy: cleared imported mail of user {}", userId);
     }
 
-    /** Deletes seeded demo data (applications, emails, companies, demo account). */
+    /** Deletes the user's seeded demo data (applications, emails, companies, demo account). */
     @Transactional
     public void clearDemoData() {
-        emailRepository.deleteDemo();
-        cascade.deleteApplications(where("demo").is(true));
-        cascade.deleteUnusedCompanies(true);
-        for (EmailAccount a : accountRepository.findByProvider(EmailProvider.DEMO)) {
+        Long userId = CurrentUser.id();
+        emailRepository.deleteDemo(userId);
+        cascade.deleteApplications(where("userId").is(userId).and("demo").is(true));
+        cascade.deleteUnusedCompanies(userId, true);
+        for (EmailAccount a : accountRepository.findByUserIdAndProvider(userId, EmailProvider.DEMO)) {
             cascade.deleteAccount(a.getId());
         }
-        log.info("Privacy: cleared demo data");
+        log.info("Privacy: cleared demo data of user {}", userId);
     }
 
-    /** Deletes everything except the user, settings and email accounts. */
+    /** Deletes all of the user's data except the user, settings and email accounts. */
     @Transactional
     public void deleteAllData() {
-        requireNoSync();
-        notificationRepository.deleteAll();
-        emailRepository.deleteAllBulk();
-        mongo.remove(new Query(), ApplicationEventEntity.class);
-        mongo.remove(new Query(), StatusHistory.class);
-        mongo.remove(new Query(), Note.class);
-        mongo.remove(new Query(), EmailMatchSuggestion.class);
-        mongo.remove(new Query(), JobApplication.class);
-        mongo.remove(new Query(), Contact.class);
-        cascade.deleteUnusedCompanies(false);
-        syncJobRepository.deleteAll();
-        accountRepository.resetAllCursors();
-        log.info("Privacy: deleted all application data");
+        Long userId = CurrentUser.id();
+        requireNoSync(userId);
+        notificationRepository.deleteByUserId(userId);
+        emailRepository.deleteAllBulk(userId);
+        mongo.remove(query(where("userId").is(userId)), ApplicationEventEntity.class);
+        mongo.remove(query(where("userId").is(userId)), StatusHistory.class);
+        mongo.remove(query(where("userId").is(userId)), Note.class);
+        mongo.remove(query(where("userId").is(userId)), EmailMatchSuggestion.class);
+        mongo.remove(query(where("userId").is(userId)), JobApplication.class);
+        mongo.remove(query(where("userId").is(userId)), Contact.class);
+        cascade.deleteUnusedCompanies(userId, false);
+        syncJobRepository.deleteByUserId(userId);
+        accountRepository.resetAllCursors(userId);
+        log.info("Privacy: deleted all application data of user {}", userId);
     }
 }

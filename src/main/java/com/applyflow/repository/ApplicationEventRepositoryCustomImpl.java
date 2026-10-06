@@ -30,48 +30,52 @@ class ApplicationEventRepositoryCustomImpl implements ApplicationEventRepository
     }
 
     @Override
-    public List<ApplicationEventEntity> findRecent(int limit) {
-        return load(query(notArchived()).with(NEWEST_FIRST).limit(limit));
+    public List<ApplicationEventEntity> findRecent(Long userId, int limit) {
+        return load(query(new Criteria().andOperator(where("userId").is(userId), notArchived(userId)))
+                .with(NEWEST_FIRST).limit(limit));
     }
 
     @Override
-    public List<ApplicationEventEntity> findRecentForCompany(Long companyId, int limit) {
-        Query apps = query(where("companyId").is(companyId));
+    public List<ApplicationEventEntity> findRecentForCompany(Long userId, Long companyId, int limit) {
+        Query apps = query(where("userId").is(userId).and("companyId").is(companyId));
         apps.fields().include("_id");
         List<Long> appIds = ops.find(apps, JobApplication.class).stream().map(JobApplication::getId).toList();
         if (appIds.isEmpty()) {
             return List.of();
         }
-        return load(query(where("applicationId").in(appIds)).with(NEWEST_FIRST).limit(limit));
+        return load(query(where("userId").is(userId).and("applicationId").in(appIds)).with(NEWEST_FIRST).limit(limit));
     }
 
     @Override
-    public List<ApplicationEventEntity> findScheduledBetween(Instant from, Instant to) {
-        Criteria c = new Criteria().andOperator(where("scheduledAt").gte(from).lt(to), notArchived());
+    public List<ApplicationEventEntity> findScheduledBetween(Long userId, Instant from, Instant to) {
+        Criteria c = new Criteria().andOperator(where("userId").is(userId), where("scheduledAt").gte(from).lt(to),
+                notArchived(userId));
         return load(query(c).with(Sort.by(Sort.Order.asc("scheduledAt"))));
     }
 
     @Override
-    public List<ApplicationEventEntity> findByTypesBetween(Collection<EventType> types, Instant from, Instant to) {
-        Criteria c = new Criteria().andOperator(where("eventType").in(types), where("eventDate").gte(from).lt(to),
-                notArchived());
+    public List<ApplicationEventEntity> findByTypesBetween(Long userId, Collection<EventType> types, Instant from,
+                                                           Instant to) {
+        Criteria c = new Criteria().andOperator(where("userId").is(userId), where("eventType").in(types),
+                where("eventDate").gte(from).lt(to), notArchived(userId));
         return load(query(c));
     }
 
     @Override
-    public long deleteForAccountEmails(Long accountId) {
-        Query emails = query(where("emailAccountId").is(accountId));
+    public long deleteForAccountEmails(Long userId, Long accountId) {
+        Query emails = query(where("userId").is(userId).and("emailAccountId").is(accountId));
         emails.fields().include("_id");
         List<Long> emailIds = ops.find(emails, EmailMessage.class).stream().map(EmailMessage::getId).toList();
         if (emailIds.isEmpty()) {
             return 0;
         }
-        return ops.remove(query(where("emailId").in(emailIds)), ApplicationEventEntity.class).getDeletedCount();
+        return ops.remove(query(where("userId").is(userId).and("emailId").in(emailIds)), ApplicationEventEntity.class)
+                .getDeletedCount();
     }
 
     /** Excludes events of archived applications (and orphans whose application no longer exists). */
-    private Criteria notArchived() {
-        Query active = query(where("archived").is(false));
+    private Criteria notArchived(Long userId) {
+        Query active = query(where("userId").is(userId).and("archived").is(false));
         active.fields().include("_id");
         List<Long> ids = ops.find(active, JobApplication.class).stream().map(JobApplication::getId).toList();
         return where("applicationId").in(ids);

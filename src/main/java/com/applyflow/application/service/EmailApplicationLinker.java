@@ -152,9 +152,11 @@ public class EmailApplicationLinker {
         if (d == null || d.recruiterEmail() == null) {
             return;
         }
-        Contact c = contactRepository.findFirstByCompanyIdAndEmailIgnoreCase(app.getCompany().getId(), d.recruiterEmail())
+        Contact c = contactRepository.findFirstByUserIdAndCompanyIdAndEmailIgnoreCase(app.getUserId(),
+                        app.getCompany().getId(), d.recruiterEmail())
                 .orElseGet(() -> {
                     Contact n = new Contact();
+                    n.setUserId(app.getUserId());
                     n.setCompany(app.getCompany());
                     n.setEmail(d.recruiterEmail().toLowerCase());
                     n.setRole("Recruiter");
@@ -204,7 +206,7 @@ public class EmailApplicationLinker {
                     .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, h:mm a", java.util.Locale.ENGLISH))
                     + ")";
         }
-        notificationService.create(type, title, message, app.getId(), email.getId(),
+        notificationService.create(app.getUserId(), type, title, message, app.getId(), email.getId(),
                 at.isAfter(Instant.now()) ? null : at);
     }
 

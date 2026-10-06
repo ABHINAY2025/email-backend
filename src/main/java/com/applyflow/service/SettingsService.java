@@ -4,12 +4,16 @@ import com.applyflow.dto.MiscDtos.AppSettings;
 import com.applyflow.entity.User;
 import com.applyflow.exception.NotFoundException;
 import com.applyflow.repository.UserRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Settings live on the single user row. */
+/** Settings live on each user's own row. */
 @Service
 public class SettingsService {
+
+    /** Defaults for new users (and the fallback when a user row is missing). */
+    public static final AppSettings DEFAULTS = new AppSettings("User", 5, 90, 0.75, true, 14);
 
     private final UserRepository userRepository;
 
@@ -19,12 +23,12 @@ public class SettingsService {
 
     @Transactional(readOnly = true)
     public AppSettings get() {
-        return toDto(user());
+        return toDto(user(CurrentUser.id()));
     }
 
     @Transactional
     public AppSettings update(AppSettings s) {
-        User u = user();
+        User u = user(CurrentUser.id());
         u.setDisplayName(s.displayName().trim());
         u.setSyncIntervalMinutes(s.syncIntervalMinutes());
         u.setDefaultInitialSyncDays(s.defaultInitialSyncDays());
@@ -34,15 +38,20 @@ public class SettingsService {
         return toDto(userRepository.save(u));
     }
 
-    /** Current settings snapshot; falls back to defaults if the user row is missing (should not happen). */
+    /** Settings snapshot of the current user (request or background owner scope). */
     @Transactional(readOnly = true)
     public AppSettings current() {
-        return userRepository.findFirstByOrderByIdAsc().map(SettingsService::toDto)
-                .orElse(new AppSettings("User", 5, 90, 0.75, true, 14));
+        return forUser(CurrentUser.id());
     }
 
-    private User user() {
-        return userRepository.findFirstByOrderByIdAsc()
+    /** Settings of the given user; defaults if the row is missing (should not happen). */
+    @Transactional(readOnly = true)
+    public AppSettings forUser(Long userId) {
+        return userRepository.findById(userId).map(SettingsService::toDto).orElse(DEFAULTS);
+    }
+
+    private User user(Long userId) {
+        return userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User settings not found."));
     }
 

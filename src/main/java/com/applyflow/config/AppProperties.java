@@ -23,10 +23,11 @@ public record AppProperties(
     public record Security(@DefaultValue("admin") String username,
                            @DefaultValue(DEV_PASSWORD) String password,
                            @DefaultValue("Abhinay") String displayName,
-                           @DefaultValue(DEV_SESSION_SECRET) String sessionSecret) {
+                           @DefaultValue(DEV_SESSION_SECRET) String sessionSecret,
+                           @DefaultValue("true") boolean registrationEnabled) {
         @Override
         public String toString() {
-            return "Security{username=" + username + "}";
+            return "Security{username=" + username + ", registrationEnabled=" + registrationEnabled + "}";
         }
     }
 

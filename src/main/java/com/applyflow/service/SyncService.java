@@ -27,6 +27,7 @@ import com.applyflow.persistence.RefLoader;
 import com.applyflow.repository.EmailAccountRepository;
 import com.applyflow.repository.SyncJobRepository;
 import com.applyflow.security.CredentialEncryptor;
+import com.applyflow.security.CurrentUser;
 import com.applyflow.sse.ServerEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,17 +44,21 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 
-/** Runs mailbox synchronisation jobs (one at a time per account) on a bounded executor. */
+/**
+ * Runs mailbox synchronisation jobs (one at a time per account) on a bounded executor. Each job runs on behalf of
+ * the mailbox owner ({@link CurrentUser#runAs}), so everything it creates belongs to that user.
+ */
 @Service
 public class SyncService {
 
     private static final Logger log = LoggerFactory.getLogger(SyncService.class);
 
-    private final Set<Long> running = ConcurrentHashMap.newKeySet();
+    /** Running account id → owner id. */
+    private final Map<Long, Long> running = new ConcurrentHashMap<>();
 
     private final EmailAccountRepository accountRepository;
     private final SyncJobRepository jobRepository;
@@ -116,21 +121,23 @@ public class SyncService {
     }
 
     public boolean isRunning(Long accountId) {
-        return running.contains(accountId);
+        return running.containsKey(accountId);
     }
 
-    public boolean isAnyRunning() {
-        return !running.isEmpty();
+    /** True while any mailbox of the given user is syncing. */
+    public boolean isAnyRunningFor(Long userId) {
+        return running.containsValue(userId);
     }
 
-    /** Starts a sync for one account. Returns the RUNNING job. */
+    /** Starts a sync for one of the current user's accounts. Returns the RUNNING job. */
     public SyncJobDto start(Long accountId) {
-        EmailAccount account = accountRepository.findById(accountId)
+        EmailAccount account = accountRepository.findByIdAndUserId(accountId, CurrentUser.id())
                 .orElseThrow(() -> NotFoundException.of("Email account", accountId));
         if (account.isDemo()) {
             throw new BadRequestException("The demo account cannot be synced.");
         }
-        if (!running.add(accountId)) {
+        Long owner = account.getUserId();
+        if (running.putIfAbsent(accountId, owner) != null) {
             throw new SyncInProgressException(account.getEmail());
         }
         SyncJobDto job;
@@ -145,7 +152,7 @@ public class SyncService {
                 a.setSyncStatus(SyncStatus.SYNCING);
                 accountRepository.save(a);
                 SyncJobDto dto = mapper.toSyncJob(j);
-                events.publish(ServerEventPublisher.SYNC_STARTED, dto);
+                events.publish(owner, ServerEventPublisher.SYNC_STARTED, dto);
                 return dto;
             });
         } catch (RuntimeException e) {
@@ -154,20 +161,20 @@ public class SyncService {
         }
         Long jobId = Objects.requireNonNull(job).id();
         try {
-            executor.execute(() -> run(accountId, jobId));
+            executor.execute(() -> CurrentUser.runAs(owner, () -> run(accountId, jobId, owner)));
         } catch (RejectedExecutionException e) {
             running.remove(accountId);
-            finishFailed(accountId, jobId, "Too many syncs are queued. Please try again shortly.");
+            finishFailed(accountId, jobId, owner, "Too many syncs are queued. Please try again shortly.");
             throw new SyncInProgressException(account.getEmail());
         }
         return job;
     }
 
-    /** Starts syncs for all enabled, non-demo accounts that are not already syncing. */
+    /** Starts syncs for all of the current user's enabled, non-demo accounts that are not already syncing. */
     public int startAll() {
         int started = 0;
-        for (EmailAccount a : accountRepository.findAllByOrderByCreatedAtAsc()) {
-            if (!a.isEnabled() || a.isDemo() || running.contains(a.getId())) {
+        for (EmailAccount a : accountRepository.findByUserIdOrderByCreatedAtAsc(CurrentUser.id())) {
+            if (!a.isEnabled() || a.isDemo() || running.containsKey(a.getId())) {
                 continue;
             }
             try {
@@ -190,7 +197,7 @@ public class SyncService {
         int batchJobEmails;
     }
 
-    void run(Long accountId, Long jobId) {
+    void run(Long accountId, Long jobId, Long owner) {
         Counters c = new Counters();
         try {
             record Snapshot(ImapConnectionSettings settings, ImapMailboxReader.Cursor cursor) {
@@ -280,7 +287,7 @@ public class SyncService {
                 accountRepository.save(a);
                 jobRepository.save(j);
                 SyncJobDto dto = mapper.toSyncJob(j);
-                events.publish(ServerEventPublisher.SYNC_COMPLETED, dto);
+                events.publish(owner, ServerEventPublisher.SYNC_COMPLETED, dto);
                 return dto;
             });
             log.info("Sync completed for account {}: fetched={}, jobEmails={}, created={}, updated={}", accountId,
@@ -288,14 +295,14 @@ public class SyncService {
             Objects.requireNonNull(done);
         } catch (ImapException e) {
             log.warn("Sync failed for account {}: {}", accountId, e.getCode());
-            finishFailed(accountId, jobId, e.getMessage(), c);
+            finishFailed(accountId, jobId, owner, e.getMessage(), c);
         } catch (IllegalStateException e) {
             log.warn("Sync failed for account {}: {}", accountId, e.getMessage());
-            finishFailed(accountId, jobId, e.getMessage() != null && e.getMessage().contains("decrypt")
+            finishFailed(accountId, jobId, owner, e.getMessage() != null && e.getMessage().contains("decrypt")
                     ? "Stored app password could not be decrypted. Please re-enter it." : "Sync failed unexpectedly.", c);
         } catch (Exception e) {
             log.error("Sync failed for account {}", accountId, e);
-            finishFailed(accountId, jobId, "Sync failed due to an unexpected error. Please try again.", c);
+            finishFailed(accountId, jobId, owner, "Sync failed due to an unexpected error. Please try again.", c);
         } finally {
             running.remove(accountId);
         }
@@ -309,11 +316,11 @@ public class SyncService {
         j.setApplicationsUpdated(c.updated);
     }
 
-    private void finishFailed(Long accountId, Long jobId, String message) {
-        finishFailed(accountId, jobId, message, new Counters());
+    private void finishFailed(Long accountId, Long jobId, Long owner, String message) {
+        finishFailed(accountId, jobId, owner, message, new Counters());
     }
 
-    private void finishFailed(Long accountId, Long jobId, String message, Counters c) {
+    private void finishFailed(Long accountId, Long jobId, Long owner, String message, Counters c) {
         try {
             tx.executeWithoutResult(s -> {
                 EmailAccount a = accountRepository.findById(accountId).orElse(null);
@@ -329,9 +336,9 @@ public class SyncService {
                     j.setFinishedAt(Instant.now());
                     j.setError(message);
                     jobRepository.save(j);
-                    events.publish(ServerEventPublisher.SYNC_FAILED, mapper.toSyncJob(j));
+                    events.publish(owner, ServerEventPublisher.SYNC_FAILED, mapper.toSyncJob(j));
                 }
-                notificationService.create(NotificationType.SYNC_FAILURE,
+                notificationService.create(owner, NotificationType.SYNC_FAILURE,
                         "Sync failed" + (a == null ? "" : " — " + a.getEmail()), message, null, null);
             });
         } catch (RuntimeException e) {
@@ -341,10 +348,12 @@ public class SyncService {
 
     // ------------------------------------------------------------------ status
 
+    /** Sync state of the current user's mailboxes and jobs only. */
     @Transactional(readOnly = true)
     public SyncStatusResponse status() {
-        List<EmailAccount> accounts = accountRepository.findAllByOrderByCreatedAtAsc();
-        boolean syncing = accounts.stream().anyMatch(a -> running.contains(a.getId())
+        Long userId = CurrentUser.id();
+        List<EmailAccount> accounts = accountRepository.findByUserIdOrderByCreatedAtAsc(userId);
+        boolean syncing = accounts.stream().anyMatch(a -> running.containsKey(a.getId())
                 || a.getSyncStatus() == SyncStatus.SYNCING);
         boolean error = accounts.stream().anyMatch(a -> a.isEnabled() && !a.isDemo()
                 && a.getSyncStatus() == SyncStatus.ERROR);
@@ -355,13 +364,13 @@ public class SyncService {
                 .map(EmailAccount::getLastError).filter(Objects::nonNull).findFirst().orElse(null);
         List<AccountSyncState> states = accounts.stream()
                 .map(a -> new AccountSyncState(a.getId(), a.getEmail(),
-                        running.contains(a.getId()) ? SyncStatus.SYNCING : a.getSyncStatus(), a.getLastSyncAt(),
+                        running.containsKey(a.getId()) ? SyncStatus.SYNCING : a.getSyncStatus(), a.getLastSyncAt(),
                         a.getLastError()))
                 .toList();
-        List<SyncJobDto> jobs = refLoader.syncJobs(jobRepository.findAllByOrderByStartedAtDescIdDesc(
+        List<SyncJobDto> jobs = refLoader.syncJobs(jobRepository.findByUserIdOrderByStartedAtDescIdDesc(userId,
                 PageRequest.of(0, 10))).stream().filter(j -> j.getEmailAccount() != null).map(mapper::toSyncJob)
                 .toList();
-        return new SyncStatusResponse(state, lastSync, lastError, settingsService.current().syncIntervalMinutes(),
+        return new SyncStatusResponse(state, lastSync, lastError, settingsService.forUser(userId).syncIntervalMinutes(),
                 states, jobs);
     }
 }

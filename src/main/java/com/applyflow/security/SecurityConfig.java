@@ -70,7 +70,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfRepository)
                         .csrfTokenRequestHandler(csrfHandler)
-                        .ignoringRequestMatchers("/api/auth/login"))
+                        .ignoringRequestMatchers("/api/auth/login", "/api/auth/register"))
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 .securityContext(sc -> sc.securityContextRepository(securityContextRepository))
                 .sessionManagement(sm -> sm
@@ -78,7 +78,8 @@ public class SecurityConfig {
                         .sessionFixation(sf -> sf.changeSessionId()))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
-                        .requestMatchers("/api/auth/login", "/api/auth/csrf", "/api/health").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/config", "/api/auth/csrf",
+                                "/api/health").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())

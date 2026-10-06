@@ -1,6 +1,6 @@
 package com.applyflow.entity;
 
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import com.applyflow.persistence.Refs;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -17,10 +17,14 @@ import java.util.Objects;
 @Document("notes")
 @Getter
 @Setter
-public class Note implements MongoEntity {
+public class Note implements OwnedEntity {
 
     @Id
     private Long id;
+
+    /** Owner (users._id); every query is scoped by it. */
+    @Indexed(name = "idx_notes_user")
+    private Long userId;
 
     @Indexed(name = "idx_notes_application")
     @Setter(AccessLevel.NONE)
@@ -45,6 +49,7 @@ public class Note implements MongoEntity {
     }
 
     public void setApplication(JobApplication application) {
+        adoptOwner(application);
         this.application = application;
         this.applicationId = application == null ? null : application.getId();
     }

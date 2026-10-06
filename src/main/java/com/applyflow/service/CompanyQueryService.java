@@ -17,6 +17,7 @@ import com.applyflow.repository.CompanyRepository;
 import com.applyflow.repository.ContactRepository;
 import com.applyflow.repository.EmailMessageRepository;
 import com.applyflow.repository.JobApplicationRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -58,12 +59,13 @@ public class CompanyQueryService {
 
     @Transactional(readOnly = true)
     public List<CompanySummary> list(String q, int limit) {
+        Long userId = CurrentUser.id();
         Map<Long, List<JobApplication>> byCompany = new HashMap<>();
-        for (JobApplication a : applicationRepository.findAllWithCompany()) {
+        for (JobApplication a : applicationRepository.findAllWithCompany(userId)) {
             byCompany.computeIfAbsent(a.getCompany().getId(), k -> new java.util.ArrayList<>()).add(a);
         }
         String needle = q == null ? null : q.trim().toLowerCase(Locale.ROOT);
-        return companyRepository.findAllByOrderByNameAsc().stream()
+        return companyRepository.findByUserIdOrderByNameAsc(userId).stream()
                 .filter(c -> needle == null || needle.isEmpty() || c.getName().toLowerCase(Locale.ROOT).contains(needle)
                         || (c.getDomain() != null && c.getDomain().toLowerCase(Locale.ROOT).contains(needle)))
                 .filter(c -> byCompany.containsKey(c.getId()))
@@ -76,27 +78,29 @@ public class CompanyQueryService {
 
     @Transactional(readOnly = true)
     public CompanyDetail get(Long id) {
-        Company c = companyRepository.findById(id).orElseThrow(() -> NotFoundException.of("Company", id));
-        List<JobApplication> apps = applicationRepository.findByCompanyIdWithCompany(id).stream()
+        Long userId = CurrentUser.id();
+        Company c = companyRepository.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> NotFoundException.of("Company", id));
+        List<JobApplication> apps = applicationRepository.findByCompanyIdWithCompany(userId, id).stream()
                 .sorted(Comparator.comparing(JobApplication::getLastActivityAt,
                         Comparator.nullsLast(Comparator.reverseOrder())))
                 .toList();
         CompanySummary s = summary(c, apps);
-        Map<String, Long> emailCounts = emailRepository.countBySenderForCompany(id);
-        List<ContactDto> contacts = contactRepository.findByCompanyIdOrderByLastContactAtDesc(id).stream()
+        Map<String, Long> emailCounts = emailRepository.countBySenderForCompany(userId, id);
+        List<ContactDto> contacts = contactRepository.findByUserIdAndCompanyIdOrderByLastContactAtDesc(userId, id).stream()
                 .map(ct -> new ContactDto(ct.getId(), ct.getName(), ct.getEmail(), ct.getRole(), ct.getLastContactAt(),
                         emailCounts.getOrDefault(ct.getEmail().toLowerCase(Locale.ROOT), 0L)))
                 .toList();
         List<ApplicationFacts.Fact> facts = factsLoader.compute(apps.stream().filter(a -> !a.isArchived()).toList());
         ResponseStats stats = new ResponseStats(analytics.responseRate(facts), analytics.avgResponseDays(facts),
-                emailRepository.countForCompany(id));
+                emailRepository.countForCompany(userId, id));
         return new CompanyDetail(c.getId(), c.getName(), c.getDomain(), applicationService.summaries(apps),
                 s.applications(), s.active(), s.interviews(), s.offers(), s.rejected(), s.latestActivityAt(),
                 c.getWebsite(), analytics.distribution(apps),
-                emailRepository.findForCompany(id, c.getName(), 25).stream()
+                emailRepository.findForCompany(userId, id, c.getName(), 25).stream()
                         .map(mapper::toInboxItem).toList(),
                 contacts,
-                eventRepository.findRecentForCompany(id, 50).stream()
+                eventRepository.findRecentForCompany(userId, id, 50).stream()
                         .map(mapper::toActivity).toList(),
                 stats);
     }

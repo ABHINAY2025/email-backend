@@ -8,6 +8,7 @@ import com.applyflow.entity.JobApplication;
 import com.applyflow.exception.BadRequestException;
 import com.applyflow.repository.ApplicationEventRepository;
 import com.applyflow.repository.JobApplicationRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,10 +50,11 @@ public class CalendarService {
         }
         Instant start = from.atStartOfDay(zone).toInstant();
         Instant end = to.plusDays(1).atStartOfDay(zone).toInstant();
-        int followUpDays = settingsService.current().followUpDays();
+        Long userId = CurrentUser.id();
+        int followUpDays = settingsService.forUser(userId).followUpDays();
         List<CalendarEvent> out = new ArrayList<>();
 
-        for (JobApplication a : applicationRepository.findAllActiveWithCompany()) {
+        for (JobApplication a : applicationRepository.findAllActiveWithCompany(userId)) {
             String company = a.getCompany().getName();
             if (a.getAppliedAt() != null && within(a.getAppliedAt(), start, end)) {
                 out.add(new CalendarEvent("app-" + a.getId() + "-applied", a.getId(), company, a.getJobTitle(),
@@ -67,7 +69,7 @@ public class CalendarService {
             }
         }
 
-        for (ApplicationEventEntity ev : eventRepository.findScheduledBetween(start, end)) {
+        for (ApplicationEventEntity ev : eventRepository.findScheduledBetween(userId, start, end)) {
             JobApplication a = ev.getApplication();
             String company = a.getCompany().getName();
             ScheduledType st = ev.getScheduledType() == null ? ScheduledType.DEADLINE : ev.getScheduledType();
@@ -100,7 +102,7 @@ public class CalendarService {
                     ev.getScheduledAt(), endAt, false, ev.getEmailId()));
         }
 
-        for (ApplicationEventEntity ev : eventRepository.findByTypesBetween(
+        for (ApplicationEventEntity ev : eventRepository.findByTypesBetween(userId,
                 EnumSet.of(EventType.OFFER, EventType.REJECTION), start, end)) {
             JobApplication a = ev.getApplication();
             String company = a.getCompany().getName();

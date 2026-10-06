@@ -20,6 +20,7 @@ import com.applyflow.repository.ApplicationEventRepository;
 import com.applyflow.repository.EmailAccountRepository;
 import com.applyflow.repository.EmailMessageRepository;
 import com.applyflow.security.CredentialEncryptor;
+import com.applyflow.security.CurrentUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -62,14 +63,16 @@ public class EmailAccountService {
 
     @Transactional(readOnly = true)
     public List<EmailAccountDto> list() {
-        return repository.findAllByOrderByCreatedAtAsc().stream().map(mapper::toAccount).toList();
+        return repository.findByUserIdOrderByCreatedAtAsc(CurrentUser.id()).stream().map(mapper::toAccount).toList();
     }
 
     /** Tests the connection first; saves nothing on failure. Starts the initial sync after commit. */
     @Transactional
     public EmailAccountDto create(CreateEmailAccountRequest req) {
+        Long userId = CurrentUser.id();
         String email = req.email().trim().toLowerCase(Locale.ROOT);
-        if (repository.existsByEmailIgnoreCase(email)) {
+        // The same mailbox may be connected by different users, but only once per user.
+        if (repository.existsByUserIdAndEmailIgnoreCase(userId, email)) {
             throw new ConflictException("The mailbox " + email + " is already connected.");
         }
         EmailProvider provider = req.provider() == null ? EmailProvider.inferFromEmail(email) : req.provider();
@@ -91,6 +94,7 @@ public class EmailAccountService {
         imapClient.testConnection(new ImapConnectionSettings(provider, host, port, ssl, username, password, folder));
 
         EmailAccount a = new EmailAccount();
+        a.setUserId(userId);
         a.setEmail(email);
         a.setProvider(provider);
         a.setHost(host);
@@ -198,8 +202,8 @@ public class EmailAccountService {
         if (syncService.isRunning(id)) {
             throw new com.applyflow.exception.SyncInProgressException(a.getEmail());
         }
-        eventRepository.deleteForAccountEmails(id);
-        emailRepository.deleteByAccountId(id);
+        eventRepository.deleteForAccountEmails(a.getUserId(), id);
+        emailRepository.deleteByAccountId(a.getUserId(), id);
         repository.resetCursor(id);
     }
 
@@ -210,8 +214,8 @@ public class EmailAccountService {
             throw new com.applyflow.exception.SyncInProgressException(a.getEmail());
         }
         if (purge) {
-            eventRepository.deleteForAccountEmails(id);
-            emailRepository.deleteByAccountId(id);
+            eventRepository.deleteForAccountEmails(a.getUserId(), id);
+            emailRepository.deleteByAccountId(a.getUserId(), id);
         } else {
             emailRepository.detachFromAccount(id);
         }
@@ -219,7 +223,8 @@ public class EmailAccountService {
     }
 
     private EmailAccount load(Long id) {
-        return repository.findById(id).orElseThrow(() -> NotFoundException.of("Email account", id));
+        return repository.findByIdAndUserId(id, CurrentUser.id())
+                .orElseThrow(() -> NotFoundException.of("Email account", id));
     }
 
     private ImapConnectionSettings settings(EmailAccount a) {

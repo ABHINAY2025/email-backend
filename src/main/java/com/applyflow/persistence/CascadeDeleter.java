@@ -60,15 +60,17 @@ public class CascadeDeleter {
         return deleteEmails(where("_id").is(id));
     }
 
-    /** Deletes every email and everything that depends on emails only. */
-    public long deleteAllEmails() {
-        ops.remove(new Query(), EmailClassificationLog.class);
-        ops.remove(new Query(), EmailMatchSuggestion.class);
-        ops.remove(query(where("emailId").ne(null)), Notification.class);
-        ops.updateMulti(query(where("emailId").exists(true)), new Update().unset("emailId"),
+    /** Deletes every email of the user and everything that depends on emails only. */
+    public long deleteAllEmails(Long userId) {
+        Criteria owner = where("userId").is(userId);
+        ops.remove(query(owner), EmailClassificationLog.class);
+        ops.remove(query(owner), EmailMatchSuggestion.class);
+        ops.remove(query(where("userId").is(userId).and("emailId").ne(null)), Notification.class);
+        ops.updateMulti(query(where("userId").is(userId).and("emailId").exists(true)), new Update().unset("emailId"),
                 ApplicationEventEntity.class);
-        ops.updateMulti(query(where("emailId").exists(true)), new Update().unset("emailId"), StatusHistory.class);
-        return ops.remove(new Query(), EmailMessage.class).getDeletedCount();
+        ops.updateMulti(query(where("userId").is(userId).and("emailId").exists(true)), new Update().unset("emailId"),
+                StatusHistory.class);
+        return ops.remove(query(owner), EmailMessage.class).getDeletedCount();
     }
 
     private void removeEmailDependents(Collection<Long> emailIds) {
@@ -113,10 +115,11 @@ public class CascadeDeleter {
         return ops.remove(query(where("_id").in(ids)), Company.class).getDeletedCount();
     }
 
-    /** Companies no application refers to (optionally only demo ones). */
-    public long deleteUnusedCompanies(boolean demoOnly) {
-        List<Long> used = ops.findDistinct(new Query(), "companyId", JobApplication.class, Long.class);
-        Criteria c = where("_id").nin(used);
+    /** The user's companies no application refers to (optionally only demo ones). */
+    public long deleteUnusedCompanies(Long userId, boolean demoOnly) {
+        List<Long> used = ops.findDistinct(query(where("userId").is(userId)), "companyId", JobApplication.class,
+                Long.class);
+        Criteria c = where("userId").is(userId).and("_id").nin(used);
         if (demoOnly) {
             c = c.and("demo").is(true);
         }

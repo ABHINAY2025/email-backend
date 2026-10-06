@@ -2,7 +2,7 @@ package com.applyflow.entity;
 
 import com.applyflow.common.ApplicationStatus;
 import com.applyflow.common.EmailClassification;
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import com.applyflow.persistence.Refs;
 import com.applyflow.persistence.Scores;
 import lombok.AccessLevel;
@@ -27,10 +27,14 @@ import java.util.Objects;
         unique = true, partialFilter = "{'emailAccountId': {'$exists': true}}")
 @Getter
 @Setter
-public class EmailMessage implements MongoEntity {
+public class EmailMessage implements OwnedEntity {
 
     @Id
     private Long id;
+
+    /** Owner (users._id); every query is scoped by it. */
+    @Indexed(name = "idx_emails_user")
+    private Long userId;
 
     @Setter(AccessLevel.NONE)
     private Long emailAccountId;
@@ -122,6 +126,7 @@ public class EmailMessage implements MongoEntity {
     }
 
     public void setEmailAccount(EmailAccount emailAccount) {
+        adoptOwner(emailAccount);
         this.emailAccount = emailAccount;
         this.emailAccountId = emailAccount == null ? null : emailAccount.getId();
     }
@@ -141,6 +146,7 @@ public class EmailMessage implements MongoEntity {
     }
 
     public void setApplication(JobApplication application) {
+        adoptOwner(application);
         this.application = application;
         this.applicationId = application == null ? null : application.getId();
     }

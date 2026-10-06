@@ -25,7 +25,9 @@ import com.applyflow.repository.JobApplicationRepository;
 import com.applyflow.repository.NoteRepository;
 import com.applyflow.repository.NotificationRepository;
 import com.applyflow.repository.SyncJobRepository;
+import com.applyflow.repository.UserRepository;
 import com.applyflow.security.CredentialEncryptor;
+import com.applyflow.security.CurrentUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -43,11 +45,13 @@ import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
  * Seeds a realistic demo data set (when enabled and the database has no applications). Demo emails are run through
  * the real {@link MailProcessingPipeline}, so the seed exercises the actual classifier, matcher and status engine.
+ * Demo data always belongs to the env-bootstrapped admin user.
  */
 @Component
 @Order(Ordered.LOWEST_PRECEDENCE)
@@ -71,8 +75,9 @@ public class DemoDataSeeder implements ApplicationRunner {
     private final TransactionTemplate tx;
     private final Clock clock;
     private final ZoneId zone;
+    private final UserRepository userRepository;
 
-    public DemoDataSeeder(AppProperties props, JobApplicationRepository applicationRepository,
+    public DemoDataSeeder(AppProperties props, UserRepository userRepository, JobApplicationRepository applicationRepository,
                           EmailAccountRepository accountRepository, EmailMessageRepository emailRepository,
                           NoteRepository noteRepository, NotificationRepository notificationRepository,
                           SyncJobRepository syncJobRepository, CompanyService companyService,
@@ -82,6 +87,7 @@ public class DemoDataSeeder implements ApplicationRunner {
                           @Qualifier("requiresNewTransactionTemplate") TransactionTemplate tx, Clock clock,
                           ZoneId appZone) {
         this.props = props;
+        this.userRepository = userRepository;
         this.applicationRepository = applicationRepository;
         this.accountRepository = accountRepository;
         this.emailRepository = emailRepository;
@@ -103,21 +109,29 @@ public class DemoDataSeeder implements ApplicationRunner {
         if (!props.seed().enabled()) {
             return;
         }
-        if (applicationRepository.count() > 0) {
+        Long adminId = userRepository.findByUsername(props.security().username().trim()).map(u -> u.getId())
+                .orElse(null);
+        if (adminId == null) {
+            log.warn("Demo seed skipped: admin user not found");
+            return;
+        }
+        if (applicationRepository.countByUserId(adminId) > 0) {
             log.info("Demo seed skipped: applications already exist");
             return;
         }
         try {
-            seed();
+            CurrentUser.runAs(adminId, () -> seed(adminId));
         } catch (RuntimeException e) {
             log.error("Demo seed failed", e);
         }
     }
 
-    private void seed() {
+    private void seed(Long adminId) {
         Instant now = clock.instant();
         Long accountId = tx.execute(s -> {
-            EmailAccount account = accountRepository.findFirstByEmailIgnoreCase(DEMO_EMAIL).orElseGet(EmailAccount::new);
+            EmailAccount account = accountRepository.findFirstByUserIdAndEmailIgnoreCase(adminId, DEMO_EMAIL)
+                    .orElseGet(EmailAccount::new);
+            account.setUserId(adminId);
             account.setEmail(DEMO_EMAIL);
             account.setProvider(EmailProvider.DEMO);
             account.setHost(EmailProvider.DEMO.defaultHost());
@@ -139,7 +153,7 @@ public class DemoDataSeeder implements ApplicationRunner {
                     {"Flipkart", "flipkart.com"}, {"Salesforce", "salesforce.com"}, {"Adobe", "adobe.com"},
                     {"Infosys", "infosys.com"}};
             for (String[] c : companies) {
-                var company = companyService.findOrCreate(c[0], null, true);
+                var company = companyService.findOrCreate(adminId, c[0], null, true);
                 company.setDomain(c[1]);
                 company.setWebsite("https://www." + c[1]);
                 companyRepository.save(company);
@@ -177,11 +191,12 @@ public class DemoDataSeeder implements ApplicationRunner {
         }
         final int storedCount = stored;
 
-        tx.executeWithoutResult(s -> postAdjust(accountId, appByThread, now, storedCount, mails.size()));
-        log.info("Demo data seeded: {} emails, {} applications", stored, applicationRepository.count());
+        tx.executeWithoutResult(s -> postAdjust(adminId, accountId, appByThread, now, storedCount, mails.size()));
+        log.info("Demo data seeded: {} emails, {} applications", stored, applicationRepository.countByUserId(adminId));
     }
 
-    private void postAdjust(Long accountId, Map<String, Long> apps, Instant now, int stored, int total) {
+    private void postAdjust(Long adminId, Long accountId, Map<String, Long> apps, Instant now, int stored,
+                            int total) {
         // Mixed sources (referrals / company site).
         setSource(apps.get("netflix-senior"), "Referral");
         setSource(apps.get("google-backend"), "Referral");
@@ -209,13 +224,15 @@ public class DemoDataSeeder implements ApplicationRunner {
 
         // Older mail and notifications have been read already.
         for (EmailMessage e : emailRepository.findAll()) {
-            if (e.isDemo() && e.getReceivedAt().isBefore(now.minus(Duration.ofDays(3)))) {
+            if (Objects.equals(adminId, e.getUserId()) && e.isDemo()
+                    && e.getReceivedAt().isBefore(now.minus(Duration.ofDays(3)))) {
                 e.setRead(true);
                 emailRepository.save(e);
             }
         }
         for (Notification n : notificationRepository.findAll()) {
-            if (n.getCreatedAt() != null && n.getCreatedAt().isBefore(now.minus(Duration.ofDays(4)))) {
+            if (Objects.equals(adminId, n.getUserId()) && n.getCreatedAt() != null
+                    && n.getCreatedAt().isBefore(now.minus(Duration.ofDays(4)))) {
                 n.setRead(true);
                 notificationRepository.save(n);
             }

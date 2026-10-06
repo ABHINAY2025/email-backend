@@ -2,7 +2,7 @@ package com.applyflow.entity;
 
 import com.applyflow.common.Actor;
 import com.applyflow.common.ApplicationStatus;
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import com.applyflow.persistence.Refs;
 import com.applyflow.persistence.Scores;
 import lombok.AccessLevel;
@@ -20,10 +20,14 @@ import java.util.Objects;
 @Document("application_status_history")
 @Getter
 @Setter
-public class StatusHistory implements MongoEntity {
+public class StatusHistory implements OwnedEntity {
 
     @Id
     private Long id;
+
+    /** Owner (users._id); every query is scoped by it. */
+    @Indexed(name = "idx_status_history_user")
+    private Long userId;
 
     @Indexed(name = "idx_status_history_application")
     @Setter(AccessLevel.NONE)
@@ -57,6 +61,7 @@ public class StatusHistory implements MongoEntity {
     }
 
     public void setApplication(JobApplication application) {
+        adoptOwner(application);
         this.application = application;
         this.applicationId = application == null ? null : application.getId();
     }

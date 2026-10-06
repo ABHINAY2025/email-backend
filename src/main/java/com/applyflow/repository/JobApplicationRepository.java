@@ -6,7 +6,5 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 public interface JobApplicationRepository extends MongoRepository<JobApplication, Long>,
         JobApplicationRepositoryCustom {
 
-    long countByCompanyId(Long companyId);
-
-    long countByArchivedFalse();
+    long countByUserId(Long userId);
 }

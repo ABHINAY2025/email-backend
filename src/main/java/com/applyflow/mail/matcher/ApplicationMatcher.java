@@ -10,6 +10,7 @@ import com.applyflow.mail.parser.ParsedEmail;
 import com.applyflow.repository.CompanyRepository;
 import com.applyflow.repository.EmailMessageRepository;
 import com.applyflow.repository.JobApplicationRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -20,7 +21,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Finds the existing application an email belongs to (thread → reference → URL → company/title scoring). */
+/**
+ * Finds the existing application an email belongs to (thread → reference → URL → company/title scoring). Only the
+ * current owner's data (see {@link CurrentUser}) is ever considered.
+ */
 @Component
 public class ApplicationMatcher {
 
@@ -39,6 +43,7 @@ public class ApplicationMatcher {
     }
 
     public MatchResult match(ParsedEmail email, ExtractedJobDetails details) {
+        Long userId = CurrentUser.id();
         // 1. Same conversation → definitive.
         Set<String> ids = new LinkedHashSet<>(email.references());
         if (email.inReplyTo() != null) {
@@ -47,7 +52,7 @@ public class ApplicationMatcher {
         String threadId = email.threadId();
         if (!ids.isEmpty() || threadId != null) {
             List<String> idList = ids.isEmpty() ? List.of(NONE) : new ArrayList<>(ids);
-            List<EmailMessage> linked = emailRepository.findLinkedInThread(idList,
+            List<EmailMessage> linked = emailRepository.findLinkedInThread(userId, idList,
                     threadId == null ? NONE : threadId);
             for (EmailMessage e : linked) {
                 if (e.getApplication() != null && (email.accountId() == null || e.getEmailAccount() == null
@@ -61,15 +66,15 @@ public class ApplicationMatcher {
         String normCompany = details.companyName() == null ? null : CompanyNames.normalize(details.companyName());
         Map<Long, JobApplication> candidates = new LinkedHashMap<>();
         if (details.applicationRef() != null) {
-            applicationRepository.findByApplicationRef(details.applicationRef())
+            applicationRepository.findByApplicationRef(userId, details.applicationRef())
                     .forEach(a -> candidates.put(a.getId(), a));
         }
         if (details.jobUrl() != null) {
-            applicationRepository.findByJobUrl(details.jobUrl()).forEach(a -> candidates.put(a.getId(), a));
+            applicationRepository.findByJobUrl(userId, details.jobUrl()).forEach(a -> candidates.put(a.getId(), a));
         }
         List<Long> companyIds = new ArrayList<>();
         String domainLabel = CompanyNames.domainLabel(details.companyDomain());
-        for (Company c : companyRepository.findAll()) {
+        for (Company c : companyRepository.findByUserId(userId)) {
             boolean nameMatch = normCompany != null && !normCompany.isBlank() && normCompany.equals(c.getNormalizedName());
             boolean domainMatch = domainLabel != null && c.getDomain() != null
                     && domainLabel.equals(CompanyNames.domainLabel(c.getDomain()));
@@ -78,7 +83,7 @@ public class ApplicationMatcher {
             }
         }
         if (!companyIds.isEmpty()) {
-            applicationRepository.findByCompanyIds(companyIds).forEach(a -> candidates.put(a.getId(), a));
+            applicationRepository.findByCompanyIds(userId, companyIds).forEach(a -> candidates.put(a.getId(), a));
         }
         if (candidates.isEmpty()) {
             return MatchResult.noMatch();

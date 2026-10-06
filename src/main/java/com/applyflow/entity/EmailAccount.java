@@ -2,26 +2,29 @@ package com.applyflow.entity;
 
 import com.applyflow.common.EmailProvider;
 import com.applyflow.common.SyncStatus;
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
 
 /** A connected mailbox (collection {@code email_accounts}). */
 @Document("email_accounts")
+@CompoundIndex(name = "uq_email_accounts_user_email", def = "{'userId': 1, 'email': 1}", unique = true)
 @Getter
 @Setter
-public class EmailAccount implements MongoEntity {
+public class EmailAccount implements OwnedEntity {
 
     @Id
     private Long id;
 
+    /** Owner (users._id); every query is scoped by it. */
+    private Long userId;
+
     /** Stored lower-case. */
-    @Indexed(unique = true, name = "uq_email_accounts_email")
     private String email;
 
     private EmailProvider provider;

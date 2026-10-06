@@ -18,9 +18,9 @@ public class CompanyService {
         this.repository = repository;
     }
 
-    /** Finds a company by normalized name (or domain) or creates it. */
+    /** Finds the user's company by normalized name (or domain) or creates it for that user. */
     @Transactional
-    public Company findOrCreate(String name, String domain, boolean demo) {
+    public Company findOrCreate(Long userId, String name, String domain, boolean demo) {
         String display = name == null || name.isBlank() ? "Unknown company" : name.trim();
         String normalized = CompanyNames.normalize(display);
         if (normalized.isBlank()) {
@@ -28,9 +28,9 @@ public class CompanyService {
         }
         String cleanDomain = domain == null || SenderAnalyzer.isIntermediaryDomain(domain) ? null
                 : CompanyNames.registrableDomain(domain);
-        Optional<Company> existing = repository.findByNormalizedName(normalized);
+        Optional<Company> existing = repository.findByUserIdAndNormalizedName(userId, normalized);
         if (existing.isEmpty() && cleanDomain != null) {
-            existing = repository.findByDomainIgnoreCase(cleanDomain).stream().findFirst();
+            existing = repository.findByUserIdAndDomainIgnoreCase(userId, cleanDomain).stream().findFirst();
         }
         if (existing.isPresent()) {
             Company c = existing.get();
@@ -46,6 +46,7 @@ public class CompanyService {
             return changed ? repository.save(c) : c;
         }
         Company c = new Company();
+        c.setUserId(userId);
         c.setName(display.length() > 255 ? display.substring(0, 255) : display);
         c.setNormalizedName(normalized.length() > 255 ? normalized.substring(0, 255) : normalized);
         c.setDomain(cleanDomain);

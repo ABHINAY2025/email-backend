@@ -575,3 +575,59 @@ Additive only; nothing above was renamed or removed.
   `database: "DOWN"` (`status` stays `"UP"`).
 - **`POST /api/email-accounts/{id}/clear` and `DELETE /api/email-accounts/{id}`** return `409 SYNC_IN_PROGRESS`
   while that account is syncing.
+
+---------------------------------------------------------------------
+## 16. Multi-user accounts & onboarding
+
+ApplyFlow is now multi-user. Anyone can create an account (unless `REGISTRATION_ENABLED=false`).
+**Every piece of data is owned by exactly one user** (email accounts, applications, emails, companies, contacts,
+events, history, notes, notifications, sync jobs, match suggestions, settings). Every endpoint only ever reads or
+changes the current user's data; ids belonging to another user behave exactly like non-existent ids (`404 NOT_FOUND`).
+Ids stay globally unique numbers (AF-<id>), so other users' ids may appear as gaps.
+
+### Auth changes
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/api/auth/register` | `RegisterRequest` | `201 CurrentUser` — creates the user AND logs them in (session created, same as login). Public, CSRF-exempt (like login). |
+| GET | `/api/auth/config` | – | `200 { registrationEnabled: boolean }` (public) |
+| POST | `/api/auth/login` | `{ username, password }` | unchanged; `username` accepts the user's **email** (case-insensitive) or their username |
+
+```ts
+interface RegisterRequest {
+  displayName: string;   // 1..80 chars, trimmed
+  email: string;         // valid email, unique (case-insensitive), max 254
+  password: string;      // 8..128 chars
+}
+interface CurrentUser {            // extended (existing fields unchanged)
+  username: string;                // for new users = their email
+  displayName: string;
+  email: string | null;            // null only for the env-bootstrapped admin
+}
+```
+Errors: `409 CONFLICT` ("An account with this email already exists."), `400 VALIDATION_FAILED` with fieldErrors,
+`403 REGISTRATION_DISABLED` ("Registration is disabled.") when disabled, `429 RATE_LIMITED` (max 5 registrations per IP per hour).
+
+### Onboarding
+```ts
+interface OnboardingStatus {
+  hasEmailAccount: boolean;      // user has ≥1 connected (non-demo) email account
+  firstSyncCompleted: boolean;   // ≥1 COMPLETED sync job for this user
+  syncInProgress: boolean;       // any of the user's accounts is syncing right now
+  hasApplications: boolean;      // ≥1 application
+  dismissed: boolean;            // user hid the guide
+  completed: boolean;            // hasEmailAccount && firstSyncCompleted
+}
+```
+| Method | Path | Response |
+|---|---|---|
+| GET | `/api/onboarding` | `OnboardingStatus` |
+| POST | `/api/onboarding/dismiss` | `204` (persists `dismissed=true`) |
+| POST | `/api/onboarding/reset` | `204` (sets `dismissed=false`, lets the user re-open the guide) |
+
+### Isolation notes (backend)
+- SSE `/api/events`: events are delivered **only to the sessions of the user who owns the data**.
+- `GET /api/sync/status`, `POST /api/sync`, notifications, dashboard, analytics, calendar, search, inbox counts,
+  companies, settings (`/api/settings` is per user), privacy endpoints: all scoped to the current user.
+- The scheduler syncs every enabled account of every user, each on its owner's `syncIntervalMinutes`.
+- Matching/dedupe (companies by normalized name, applications, threads) only considers the owner's data.
+- Email accounts: the same mailbox address may be connected by different users, but only once per user.

@@ -6,12 +6,16 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 import java.util.List;
 import java.util.Optional;
 
-/** Deleting unused companies (with their contacts) is done by {@code CascadeDeleter}. */
+/** Deleting unused companies (with their contacts) is done by {@code CascadeDeleter}. Scoped by owner. */
 public interface CompanyRepository extends MongoRepository<Company, Long> {
 
-    Optional<Company> findByNormalizedName(String normalizedName);
+    Optional<Company> findByIdAndUserId(Long id, Long userId);
 
-    List<Company> findByDomainIgnoreCase(String domain);
+    Optional<Company> findByUserIdAndNormalizedName(Long userId, String normalizedName);
 
-    List<Company> findAllByOrderByNameAsc();
+    List<Company> findByUserIdAndDomainIgnoreCase(Long userId, String domain);
+
+    List<Company> findByUserIdOrderByNameAsc(Long userId);
+
+    List<Company> findByUserId(Long userId);
 }

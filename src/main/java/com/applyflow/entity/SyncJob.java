@@ -1,7 +1,7 @@
 package com.applyflow.entity;
 
 import com.applyflow.common.SyncJobStatus;
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import com.applyflow.persistence.Refs;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -9,6 +9,7 @@ import lombok.Setter;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
@@ -16,12 +17,16 @@ import java.util.Objects;
 
 /** Collection {@code sync_jobs}. */
 @Document("sync_jobs")
+@CompoundIndex(name = "idx_sync_jobs_user_started", def = "{'userId': 1, 'startedAt': -1}")
 @Getter
 @Setter
-public class SyncJob implements MongoEntity {
+public class SyncJob implements OwnedEntity {
 
     @Id
     private Long id;
+
+    /** Owner (users._id); every query is scoped by it. */
+    private Long userId;
 
     @Indexed(name = "idx_sync_jobs_account")
     @Setter(AccessLevel.NONE)
@@ -60,6 +65,7 @@ public class SyncJob implements MongoEntity {
     }
 
     public void setEmailAccount(EmailAccount emailAccount) {
+        adoptOwner(emailAccount);
         this.emailAccount = emailAccount;
         this.emailAccountId = emailAccount == null ? null : emailAccount.getId();
     }

@@ -11,18 +11,25 @@ import java.util.Optional;
 
 public interface EmailAccountRepository extends MongoRepository<EmailAccount, Long> {
 
-    Optional<EmailAccount> findFirstByEmailIgnoreCase(String email);
+    Optional<EmailAccount> findByIdAndUserId(Long id, Long userId);
 
-    boolean existsByEmailIgnoreCase(String email);
+    Optional<EmailAccount> findFirstByUserIdAndEmailIgnoreCase(Long userId, String email);
 
+    boolean existsByUserIdAndEmailIgnoreCase(Long userId, String email);
+
+    List<EmailAccount> findByUserIdOrderByCreatedAtAsc(Long userId);
+
+    /** All users' mailboxes (scheduler / startup recovery only). */
     List<EmailAccount> findAllByOrderByCreatedAtAsc();
 
-    List<EmailAccount> findByProvider(EmailProvider provider);
+    List<EmailAccount> findByUserIdAndProvider(Long userId, EmailProvider provider);
 
-    @Query("{}")
+    long countByUserIdAndProviderNot(Long userId, EmailProvider provider);
+
+    @Query("{ 'userId': ?0 }")
     @Update("{ '$unset': { 'lastUid': 1, 'uidValidity': 1 }, '$set': { 'emailsProcessed': 0, "
             + "'jobEmails': 0 } }")
-    long resetAllCursors();
+    long resetAllCursors(Long userId);
 
     @Query("{ '_id': ?0 }")
     @Update("{ '$unset': { 'lastUid': 1, 'uidValidity': 1 }, '$set': { 'emailsProcessed': 0, "

@@ -17,6 +17,7 @@ import com.applyflow.repository.ApplicationEventRepository;
 import com.applyflow.repository.EmailAccountRepository;
 import com.applyflow.repository.EmailMatchSuggestionRepository;
 import com.applyflow.repository.EmailMessageRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -81,7 +82,8 @@ public class DashboardService {
         long waiting = apps.stream().filter(a -> a.getStatus().isWaiting()).count();
         long appliedThisWeek = apps.stream()
                 .filter(a -> a.getAppliedAt() != null && !a.getAppliedAt().isBefore(weekStart)).count();
-        Instant lastSync = accountRepository.findAll().stream().map(EmailAccount::getLastSyncAt)
+        Instant lastSync = accountRepository.findByUserIdOrderByCreatedAtAsc(CurrentUser.id()).stream()
+                .map(EmailAccount::getLastSyncAt)
                 .filter(Objects::nonNull).max(Comparator.naturalOrder()).orElse(null);
         return new DashboardSummary(apps.size(), active, interviews, offers, rejected, waiting,
                 analytics.distribution(apps), appliedThisWeek, analytics.responseRate(facts), lastSync);
@@ -90,18 +92,19 @@ public class DashboardService {
     @Transactional(readOnly = true)
     public List<ActivityItem> activity(int limit) {
         int l = Math.max(1, Math.min(200, limit));
-        return eventRepository.findRecent(l).stream().map(mapper::toActivity).toList();
+        return eventRepository.findRecent(CurrentUser.id(), l).stream().map(mapper::toActivity).toList();
     }
 
     @Transactional(readOnly = true)
     public List<AttentionItem> attention() {
         Instant now = clock.instant();
-        int followUpDays = settingsService.current().followUpDays();
+        Long userId = CurrentUser.id();
+        int followUpDays = settingsService.forUser(userId).followUpDays();
         List<AttentionItem> items = new ArrayList<>();
         Set<Long> emailsCovered = new HashSet<>();
 
         // Upcoming interviews / assessments / deadlines in the next 14 days.
-        for (ApplicationEventEntity ev : eventRepository.findScheduledBetween(now.minus(Duration.ofHours(2)),
+        for (ApplicationEventEntity ev : eventRepository.findScheduledBetween(userId, now.minus(Duration.ofHours(2)),
                 now.plus(Duration.ofDays(14)))) {
             JobApplication a = ev.getApplication();
             if (a.getStatus().isTerminal()) {
@@ -124,7 +127,7 @@ public class DashboardService {
         }
 
         // Unread emails that need an action.
-        for (EmailMessage e : emailRepository.findUnreadActionRequired()) {
+        for (EmailMessage e : emailRepository.findUnreadActionRequired(userId)) {
             if (emailsCovered.contains(e.getId()) || e.isNeedsReview()) {
                 continue;
             }
@@ -142,7 +145,7 @@ public class DashboardService {
         }
 
         // Emails needing review (low confidence or possible application match).
-        List<EmailMessage> review = emailRepository.findNeedsReview();
+        List<EmailMessage> review = emailRepository.findNeedsReview(userId);
         Set<Long> withSuggestions = review.isEmpty() ? Set.of()
                 : new HashSet<>(suggestionRepository.findEmailIdsWithSuggestions(
                 review.stream().map(EmailMessage::getId).toList()));

@@ -8,6 +8,7 @@ import com.applyflow.service.HealthService;
 import com.applyflow.service.NotificationService;
 import com.applyflow.service.PrivacyService;
 import com.applyflow.service.SettingsService;
+import com.applyflow.security.CurrentUser;
 import com.applyflow.sse.SseEmitterRegistry;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -112,6 +113,6 @@ public class SystemController {
     public SseEmitter events(HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-cache, no-transform");
         response.setHeader("X-Accel-Buffering", "no"); // nginx: do not buffer SSE
-        return sseRegistry.register();
+        return sseRegistry.register(CurrentUser.id()); // events of this user only
     }
 }

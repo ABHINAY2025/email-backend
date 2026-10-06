@@ -39,15 +39,17 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
     }
 
     @Override
-    public Page<EmailMessage> findPage(Criteria criteria, Pageable pageable) {
+    public Page<EmailMessage> findPage(Long userId, Criteria filter, Pageable pageable) {
+        Criteria criteria = new Criteria().andOperator(where("userId").is(userId), filter);
         long total = ops.count(query(criteria), EmailMessage.class);
         List<EmailMessage> content = load(query(criteria).with(pageable));
         return new PageImpl<>(content, pageable, total);
     }
 
     @Override
-    public List<EmailMessage> findLinkedInThread(Collection<String> messageIds, String threadId) {
+    public List<EmailMessage> findLinkedInThread(Long userId, Collection<String> messageIds, String threadId) {
         Criteria c = new Criteria().andOperator(
+                where("userId").is(userId),
                 where("applicationId").ne(null),
                 new Criteria().orOperator(where("messageIdHeader").in(messageIds), where("threadId").is(threadId)));
         List<EmailMessage> list = load(query(c).with(Sort.by(Sort.Order.desc("receivedAt"))));
@@ -55,19 +57,19 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
     }
 
     @Override
-    public List<EmailMessage> findByApplicationIdOrdered(Long appId) {
-        return load(query(where("applicationId").is(appId).and("jobRelated").is(true))
+    public List<EmailMessage> findByApplicationIdOrdered(Long userId, Long appId) {
+        return load(query(where("userId").is(userId).and("applicationId").is(appId).and("jobRelated").is(true))
                 .with(Sort.by(Sort.Order.asc("receivedAt"), Sort.Order.asc("_id"))));
     }
 
     @Override
-    public Map<Long, Long> countByApplicationIds(Collection<Long> ids) {
+    public Map<Long, Long> countByApplicationIds(Long userId, Collection<Long> ids) {
         Map<Long, Long> counts = new HashMap<>();
         if (ids.isEmpty()) {
             return counts;
         }
         Aggregation agg = Aggregation.newAggregation(
-                Aggregation.match(where("applicationId").in(ids).and("jobRelated").is(true)),
+                Aggregation.match(where("userId").is(userId).and("applicationId").in(ids).and("jobRelated").is(true)),
                 Aggregation.group("applicationId").count().as("n"));
         for (Document d : ops.aggregate(agg, EmailMessage.class, Document.class).getMappedResults()) {
             if (d.get("_id") instanceof Number id && d.get("n") instanceof Number n) {
@@ -78,8 +80,8 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
     }
 
     @Override
-    public List<LinkedEmailRow> findLinkedClassificationRows() {
-        Query q = query(where("applicationId").ne(null).and("jobRelated").is(true));
+    public List<LinkedEmailRow> findLinkedClassificationRows(Long userId) {
+        Query q = query(where("userId").is(userId).and("applicationId").ne(null).and("jobRelated").is(true));
         q.fields().include("applicationId", "classification", "receivedAt");
         return ops.find(q, EmailMessage.class).stream()
                 .map(e -> new LinkedEmailRow(e.getApplicationId(), e.getClassification(), e.getReceivedAt()))
@@ -87,9 +89,9 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
     }
 
     @Override
-    public Map<EmailClassification, Long> countByClassification() {
+    public Map<EmailClassification, Long> countByClassification(Long userId) {
         Aggregation agg = Aggregation.newAggregation(
-                Aggregation.match(where("jobRelated").is(true)),
+                Aggregation.match(where("userId").is(userId).and("jobRelated").is(true)),
                 Aggregation.group("classification").count().as("n"));
         Map<EmailClassification, Long> out = new EnumMap<>(EmailClassification.class);
         for (Document d : ops.aggregate(agg, EmailMessage.class, Document.class).getMappedResults()) {
@@ -105,20 +107,20 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
     }
 
     @Override
-    public List<EmailMessage> findUnreadActionRequired() {
-        return load(query(where("jobRelated").is(true).and("read").is(false).and("actionRequired").is(true))
+    public List<EmailMessage> findUnreadActionRequired(Long userId) {
+        return load(query(where("userId").is(userId).and("jobRelated").is(true).and("read").is(false).and("actionRequired").is(true))
                 .with(Sort.by(Sort.Order.desc("receivedAt"))));
     }
 
     @Override
-    public List<EmailMessage> findNeedsReview() {
-        return load(query(where("jobRelated").is(true).and("needsReview").is(true))
+    public List<EmailMessage> findNeedsReview(Long userId) {
+        return load(query(where("userId").is(userId).and("jobRelated").is(true).and("needsReview").is(true))
                 .with(Sort.by(Sort.Order.desc("receivedAt"))));
     }
 
     @Override
-    public List<EmailMessage> findForCompany(Long companyId, String companyName, int limit) {
-        List<Long> appIds = companyApplicationIds(companyId);
+    public List<EmailMessage> findForCompany(Long userId, Long companyId, String companyName, int limit) {
+        List<Long> appIds = companyApplicationIds(userId, companyId);
         Criteria byApp = where("applicationId").in(appIds);
         Criteria either = byApp;
         if (companyName != null) {
@@ -127,18 +129,18 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
                     where("detectedCompany").regex("^" + Pattern.quote(companyName) + "$", "i"));
             either = new Criteria().orOperator(byApp, byName);
         }
-        Criteria c = new Criteria().andOperator(where("jobRelated").is(true), either);
+        Criteria c = new Criteria().andOperator(where("userId").is(userId), where("jobRelated").is(true), either);
         return load(query(c).with(Sort.by(Sort.Order.desc("receivedAt"))).limit(limit));
     }
 
     @Override
-    public Map<String, Long> countBySenderForCompany(Long companyId) {
-        List<Long> appIds = companyApplicationIds(companyId);
+    public Map<String, Long> countBySenderForCompany(Long userId, Long companyId) {
+        List<Long> appIds = companyApplicationIds(userId, companyId);
         Map<String, Long> out = new HashMap<>();
         if (appIds.isEmpty()) {
             return out;
         }
-        Query q = query(where("applicationId").in(appIds).and("jobRelated").is(true));
+        Query q = query(where("userId").is(userId).and("applicationId").in(appIds).and("jobRelated").is(true));
         q.fields().include("senderEmail");
         for (EmailMessage e : ops.find(q, EmailMessage.class)) {
             if (e.getSenderEmail() != null) {
@@ -149,18 +151,20 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
     }
 
     @Override
-    public long countForCompany(Long companyId) {
-        List<Long> appIds = companyApplicationIds(companyId);
+    public long countForCompany(Long userId, Long companyId) {
+        List<Long> appIds = companyApplicationIds(userId, companyId);
         if (appIds.isEmpty()) {
             return 0;
         }
-        return ops.count(query(where("applicationId").in(appIds).and("jobRelated").is(true)), EmailMessage.class);
+        return ops.count(query(where("userId").is(userId).and("applicationId").in(appIds).and("jobRelated").is(true)),
+                EmailMessage.class);
     }
 
     @Override
-    public List<EmailMessage> search(String needle, int limit) {
+    public List<EmailMessage> search(Long userId, String needle, int limit) {
         String regex = Pattern.quote(needle.trim());
-        Criteria c = new Criteria().andOperator(where("jobRelated").is(true), new Criteria().orOperator(
+        Criteria c = new Criteria().andOperator(where("userId").is(userId), where("jobRelated").is(true),
+                new Criteria().orOperator(
                 where("subject").regex(regex, "i"),
                 where("senderEmail").regex(regex, "i"),
                 where("senderName").regex(regex, "i")));
@@ -168,27 +172,27 @@ class EmailMessageRepositoryCustomImpl implements EmailMessageRepositoryCustom {
     }
 
     @Override
-    public long deleteByApplicationId(Long appId) {
-        return cascade.deleteEmails(where("applicationId").is(appId));
+    public long deleteByApplicationId(Long userId, Long appId) {
+        return cascade.deleteEmails(where("userId").is(userId).and("applicationId").is(appId));
     }
 
     @Override
-    public long deleteByAccountId(Long accountId) {
-        return cascade.deleteEmails(where("emailAccountId").is(accountId));
+    public long deleteByAccountId(Long userId, Long accountId) {
+        return cascade.deleteEmails(where("userId").is(userId).and("emailAccountId").is(accountId));
     }
 
     @Override
-    public long deleteDemo() {
-        return cascade.deleteEmails(where("demo").is(true));
+    public long deleteDemo(Long userId) {
+        return cascade.deleteEmails(where("userId").is(userId).and("demo").is(true));
     }
 
     @Override
-    public long deleteAllBulk() {
-        return cascade.deleteAllEmails();
+    public long deleteAllBulk(Long userId) {
+        return cascade.deleteAllEmails(userId);
     }
 
-    private List<Long> companyApplicationIds(Long companyId) {
-        Query q = query(where("companyId").is(companyId));
+    private List<Long> companyApplicationIds(Long userId, Long companyId) {
+        Query q = query(where("userId").is(userId).and("companyId").is(companyId));
         q.fields().include("_id");
         return ops.find(q, JobApplication.class).stream().map(JobApplication::getId).toList();
     }

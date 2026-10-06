@@ -5,21 +5,17 @@ import com.applyflow.entity.User;
 import com.applyflow.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Upserts the single user from environment configuration at startup and warns about insecure dev defaults
- * (never logging the values).
+ * Creates/updates the admin user from environment configuration (APP_USERNAME / APP_PASSWORD / APP_DISPLAY_NAME)
+ * and warns about insecure dev defaults (never logging the values). Called at startup by
+ * {@link com.applyflow.persistence.MongoSchemaInitializer}, before anything reads data, because the ownership
+ * migration assigns pre-multi-user data to this user.
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
-public class UserBootstrap implements ApplicationRunner {
+public class UserBootstrap {
 
     private static final Logger log = LoggerFactory.getLogger(UserBootstrap.class);
 
@@ -33,18 +29,18 @@ public class UserBootstrap implements ApplicationRunner {
         this.props = props;
     }
 
-    @Override
-    @Transactional
-    public void run(ApplicationArguments args) {
+    /** Upserts the admin user and returns it. Idempotent. */
+    public User ensureAdmin() {
         warnAboutDefaults();
         AppProperties.Security sec = props.security();
         String username = sec.username().trim();
         User user = userRepository.findByUsername(username).orElse(null);
         if (user == null) {
-            // Single-user app: rename an existing user row (keeps settings) if the username changed.
-            user = userRepository.findFirstByOrderByIdAsc().orElse(null);
+            // The configured username changed: rename the existing admin (the only user without an email; keeps
+            // its settings and data). Self-registered users are never renamed.
+            user = userRepository.findFirstByEmailIsNullOrderByIdAsc().orElse(null);
             if (user != null) {
-                log.info("Configured username changed; updating the existing user record");
+                log.info("Configured admin username changed; updating the existing admin record");
                 user.setUsername(username);
             }
         }
@@ -54,14 +50,14 @@ public class UserBootstrap implements ApplicationRunner {
             user.setDisplayName(sec.displayName());
             user.setPasswordHash(passwordEncoder.encode(sec.password()));
             userRepository.save(user);
-            log.info("Created application user '{}'", username);
-            return;
+            log.info("Created admin user '{}'", username);
+            return user;
         }
         if (!passwordEncoder.matches(sec.password(), user.getPasswordHash())) {
             user.setPasswordHash(passwordEncoder.encode(sec.password()));
-            log.info("Updated password hash for user '{}' from configuration", username);
+            log.info("Updated password hash for admin user '{}' from configuration", username);
         }
-        userRepository.save(user);
+        return userRepository.save(user);
     }
 
     private void warnAboutDefaults() {

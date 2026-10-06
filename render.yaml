@@ -27,5 +27,7 @@ services:
         value: Asia/Kolkata
       - key: SEED_DATA
         value: "false"
+      - key: REGISTRATION_ENABLED
+        value: "true"
       - key: CORS_ORIGINS
         value: https://email-frontend-coral-five.vercel.app,http://localhost:5173

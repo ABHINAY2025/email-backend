@@ -2,7 +2,7 @@ package com.applyflow.entity;
 
 import com.applyflow.common.Actor;
 import com.applyflow.common.EmailClassification;
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import com.applyflow.persistence.Scores;
 import lombok.Getter;
 import lombok.Setter;
@@ -16,10 +16,14 @@ import java.time.Instant;
 @Document("email_classifications")
 @Getter
 @Setter
-public class EmailClassificationLog implements MongoEntity {
+public class EmailClassificationLog implements OwnedEntity {
 
     @Id
     private Long id;
+
+    /** Owner (users._id); every query is scoped by it. */
+    @Indexed(name = "idx_email_classifications_user")
+    private Long userId;
 
     @Indexed(name = "idx_email_classifications_email")
     private Long emailId;

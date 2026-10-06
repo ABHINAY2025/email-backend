@@ -5,13 +5,19 @@ import com.applyflow.persistence.Scores;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
 
-/** The single application user; also carries the app settings (collection {@code users}). */
+/**
+ * An application user; also carries that user's settings (collection {@code users}). Self-registered users have
+ * {@code username == email} (lower-case); the env-bootstrapped admin has no email.
+ */
 @Document("users")
+@CompoundIndex(name = "uq_users_email", def = "{'email': 1}", unique = true,
+        partialFilter = "{'email': {'$type': 'string'}}")
 @Getter
 @Setter
 public class User implements MongoEntity {
@@ -21,6 +27,9 @@ public class User implements MongoEntity {
 
     @Indexed(unique = true, name = "uq_users_username")
     private String username;
+
+    /** Lower-case; null for the env-bootstrapped admin. */
+    private String email;
 
     private String passwordHash;
 
@@ -35,6 +44,9 @@ public class User implements MongoEntity {
     private boolean autoUpdateStatus = true;
 
     private Integer followUpDays = 14;
+
+    /** The user hid the onboarding guide. */
+    private boolean onboardingDismissed;
 
     private Instant createdAt;
 

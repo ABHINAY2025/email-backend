@@ -31,6 +31,7 @@ import com.applyflow.repository.JobApplicationRepository;
 import com.applyflow.repository.NotificationRepository;
 import com.applyflow.exception.BadRequestException;
 import com.applyflow.exception.NotFoundException;
+import com.applyflow.security.CurrentUser;
 import com.applyflow.sse.ServerEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -125,18 +126,19 @@ public class InboxService {
                     where("snippet").regex(regex, "i")));
         }
         int s = Math.max(1, Math.min(200, size));
-        Page<EmailMessage> result = emailRepository.findPage(new Criteria().andOperator(p),
+        Page<EmailMessage> result = emailRepository.findPage(CurrentUser.id(), new Criteria().andOperator(p),
                 PageRequest.of(Math.max(0, page), s, Sort.by(Sort.Order.desc("receivedAt"), Sort.Order.desc("_id"))));
         return PageResponse.of(result, mapper::toInboxItem);
     }
 
     @Transactional(readOnly = true)
     public InboxCounts counts() {
-        Map<EmailClassification, Long> byClass = emailRepository.countByClassification();
+        Long userId = CurrentUser.id();
+        Map<EmailClassification, Long> byClass = emailRepository.countByClassification(userId);
         long applications = APPLICATIONS_TAB.stream().mapToLong(c -> byClass.getOrDefault(c, 0L)).sum();
         return new InboxCounts(
-                emailRepository.countByJobRelatedTrue(),
-                emailRepository.countByJobRelatedTrueAndActionRequiredTrue(),
+                emailRepository.countByUserIdAndJobRelatedTrue(userId),
+                emailRepository.countByUserIdAndJobRelatedTrueAndActionRequiredTrue(userId),
                 applications,
                 byClass.getOrDefault(EmailClassification.RECRUITER_CONTACT, 0L),
                 byClass.getOrDefault(EmailClassification.INTERVIEW_INVITATION, 0L)
@@ -144,8 +146,8 @@ public class InboxService {
                 byClass.getOrDefault(EmailClassification.ASSESSMENT, 0L),
                 byClass.getOrDefault(EmailClassification.OFFER, 0L),
                 byClass.getOrDefault(EmailClassification.REJECTION, 0L),
-                emailRepository.countByJobRelatedTrueAndNeedsReviewTrue(),
-                emailRepository.countByJobRelatedTrueAndReadFalse());
+                emailRepository.countByUserIdAndJobRelatedTrueAndNeedsReviewTrue(userId),
+                emailRepository.countByUserIdAndJobRelatedTrueAndReadFalse(userId));
     }
 
     @Transactional(readOnly = true)
@@ -174,24 +176,26 @@ public class InboxService {
         suggestionRepository.deleteForEmail(id);
         notificationRepository.deleteDuplicateNoticesForEmail(id);
         emailRepository.save(e); // before counting, so this email no longer counts as needing review
-        if (emailRepository.countByApplicationIdAndNeedsReviewTrue(app.getId()) == 0) {
+        if (emailRepository.countByUserIdAndApplicationIdAndNeedsReviewTrue(app.getUserId(), app.getId()) == 0) {
             app.setNeedsReview(false);
         }
         applicationRepository.save(app);
-        events.publish(ServerEventPublisher.APPLICATION_UPDATED, applicationService.summaries(List.of(app)).get(0));
+        events.publish(app.getUserId(), ServerEventPublisher.APPLICATION_UPDATED,
+                applicationService.summaries(List.of(app)).get(0));
         return mapper.toEmailDetail(e, List.of());
     }
 
     /**
      * Re-matches review emails that had no candidate application when they were processed — typically an update
      * that arrived in the same minute as, but was processed before, the confirmation that created the application.
-     * Returns the number of emails linked automatically.
+     * Returns the number of emails linked automatically. Only considers the current owner's emails/applications.
      */
     @Transactional
     public int reconcileOrphans() {
         int linked = 0;
-        AppSettings settings = settingsService.current();
-        for (EmailMessage e : emailRepository.findNeedsReview()) {
+        Long userId = CurrentUser.id();
+        AppSettings settings = settingsService.forUser(userId);
+        for (EmailMessage e : emailRepository.findNeedsReview(userId)) {
             if (e.getApplication() != null || !suggestionRepository.findForEmail(e.getId()).isEmpty()) {
                 continue;
             }
@@ -204,12 +208,13 @@ public class InboxService {
                 e.setNeedsReview(false);
                 applicationRepository.save(app);
                 emailRepository.save(e);
-                events.publish(ServerEventPublisher.APPLICATION_UPDATED,
+                events.publish(app.getUserId(), ServerEventPublisher.APPLICATION_UPDATED,
                         applicationService.summaries(List.of(app)).get(0));
                 linked++;
             } else if (match.decision() == MatchResult.Decision.REVIEW) {
                 for (ScoredMatch s : match.suggestions()) {
                     EmailMatchSuggestion ms = new EmailMatchSuggestion();
+                    ms.setUserId(e.getUserId());
                     ms.setEmailId(e.getId());
                     ms.setApplicationId(s.applicationId());
                     ms.setScore(s.score());
@@ -241,7 +246,8 @@ public class InboxService {
         applicationRepository.save(app);
         emailRepository.save(e);
         ApplicationDetail detail = applicationService.detail(app);
-        events.publish(ServerEventPublisher.APPLICATION_CREATED, applicationService.summaries(List.of(app)).get(0));
+        events.publish(app.getUserId(), ServerEventPublisher.APPLICATION_CREATED,
+                applicationService.summaries(List.of(app)).get(0));
         return detail;
     }
 
@@ -326,6 +332,7 @@ public class InboxService {
 
     private void logManual(EmailMessage e, EmailClassification c) {
         EmailClassificationLog l = new EmailClassificationLog();
+        l.setUserId(e.getUserId());
         l.setEmailId(e.getId());
         l.setClassification(c);
         l.setConfidence(1.0);
@@ -335,7 +342,8 @@ public class InboxService {
     }
 
     private EmailMessage load(Long id) {
-        return emailRepository.findById(id).filter(EmailMessage::isJobRelated)
+        // Another user's id behaves exactly like a non-existent one (404).
+        return emailRepository.findByIdAndUserId(id, CurrentUser.id()).filter(EmailMessage::isJobRelated)
                 .orElseThrow(() -> NotFoundException.of("Email", id));
     }
 

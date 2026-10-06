@@ -1,6 +1,7 @@
 # ApplyFlow
 
-Private, single-user job-application tracker powered by your own mailboxes.
+Multi-user job-application tracker powered by your own mailboxes. Anyone can create an account (self-service
+registration, can be switched off); every user only ever sees their own mailboxes, emails and applications.
 ApplyFlow reads your email over IMAP (Gmail App Passwords), keeps **only** job-application emails,
 groups them into applications, tracks status changes automatically, and shows everything in a
 Jira/Linear-style workspace: overview dashboard, applications, job inbox, calendar, Kanban, companies and analytics.
@@ -30,11 +31,12 @@ the box; a local `mongod` must run as a single-node replica set because ApplyFlo
    cd frontend && npm install && npm run dev   # :5173, proxies /api → :8080
    ```
 
-3. Open http://localhost:5173 and log in with `APP_USERNAME` / `APP_PASSWORD` (defaults `admin` / `applyflow`).
+3. Open http://localhost:5173 and either create an account (**Sign up**) or log in as the built-in admin with
+   `APP_USERNAME` / `APP_PASSWORD` (defaults `admin` / `applyflow`).
 
 Without `MONGO_URI` the backend defaults to `mongodb://localhost:27017/applyflow` (see [.env.example](.env.example)).
 Ids stay numeric (`AF-42`): each collection has its own sequence in the `counters` collection.
-On first start the backend seeds realistic demo data (29 applications, 60 emails) so the UI is populated.
+On first start the backend seeds realistic demo data (29 applications, 60 emails) for the admin user so the UI is populated.
 Remove it any time in **Settings → General → Privacy & data → Remove demo data**, or disable with `SEED_DATA=false`.
 
 Tests: `cd backend && ./mvnw test`. Frontend type-check + build: `cd frontend && npm run build`.
@@ -79,10 +81,26 @@ emails that already passed the job-related pre-filter.
 - Delete individual emails, applications, account connections (optionally with their mail), clear all imported mail, or delete all data.
 - Use HTTPS (e.g. a reverse proxy) if you expose it beyond localhost.
 
+## Accounts (multi-user)
+
+- `POST /api/auth/register` creates an account (display name, email, password ≥ 8 chars) and signs the user in;
+  the email (lower-cased) is the username. Passwords are hashed with bcrypt. Registration is limited to 5 per IP per
+  hour and can be disabled with `REGISTRATION_ENABLED=false` (`GET /api/auth/config` tells the UI).
+- The admin from `APP_USERNAME` / `APP_PASSWORD` is still created/updated on every start. Data from the earlier
+  single-user version (documents without an owner) is assigned to this admin automatically at startup.
+- Every document carries its owner's `userId`; all endpoints, the mail pipeline, matching, notifications and SSE
+  events are scoped to that user (other users' ids answer 404). Settings and the onboarding checklist
+  (`/api/onboarding`) are per user. The scheduler syncs every user's mailboxes on that user's interval.
+- **Privacy note for operators:** all users' job-related emails (subject, sender, body of job mail) are stored in the
+  one shared MongoDB database, and their IMAP app passwords are encrypted with the single server key
+  (`APP_ENCRYPTION_KEY`). Whoever runs the server and its database can therefore read every user's job mail — only
+  invite people who trust the operator.
+
 ## Environment variables
 
 See [.env.example](.env.example). Key ones: `MONGO_URI`, `MONGO_DATABASE`,
-`APP_ENCRYPTION_KEY`, `SESSION_SECRET`, `APP_USERNAME`, `APP_PASSWORD`, `APP_DISPLAY_NAME`, `SEED_DATA`, `SYNC_ENABLED`,
+`APP_ENCRYPTION_KEY`, `SESSION_SECRET`, `APP_USERNAME`, `APP_PASSWORD`, `APP_DISPLAY_NAME`, `REGISTRATION_ENABLED`
+(default `true`), `SEED_DATA`, `SYNC_ENABLED`,
 `APP_TIMEZONE` (default `Asia/Kolkata`; used for date parsing in emails and for week/day boundaries).
 
 ## Project layout

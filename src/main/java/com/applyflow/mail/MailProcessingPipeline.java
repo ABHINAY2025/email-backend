@@ -27,6 +27,7 @@ import com.applyflow.repository.EmailClassificationLogRepository;
 import com.applyflow.repository.EmailMatchSuggestionRepository;
 import com.applyflow.repository.EmailMessageRepository;
 import com.applyflow.repository.JobApplicationRepository;
+import com.applyflow.security.CurrentUser;
 import com.applyflow.service.NotificationService;
 import com.applyflow.service.SettingsService;
 import com.applyflow.sse.ServerEventPublisher;
@@ -116,9 +117,21 @@ public class MailProcessingPipeline {
     }
 
     /**
+     * Everything created for the email is owned by the owner of its mailbox (or the current user when the email has
+     * no mailbox); matching only ever considers that owner's data.
+     *
      * @param precomputed optional classification already computed for this email (avoids re-classifying)
      */
     public ProcessingOutcome process(ParsedEmail email, ClassificationResult precomputed) {
+        Long owner = email.accountId() == null ? null
+                : accountRepository.findById(email.accountId()).map(EmailAccount::getUserId).orElse(null);
+        if (owner == null) {
+            owner = CurrentUser.id();
+        }
+        return CurrentUser.callAs(owner, () -> processAsOwner(email, precomputed));
+    }
+
+    private ProcessingOutcome processAsOwner(ParsedEmail email, ClassificationResult precomputed) {
         for (int attempt = 1; ; attempt++) {
             try {
                 // Own, short transaction per email: a failure here never rolls back other emails.
@@ -182,6 +195,7 @@ public class MailProcessingPipeline {
         }
 
         EmailMessage e = new EmailMessage();
+        e.setUserId(account != null && account.getUserId() != null ? account.getUserId() : CurrentUser.id());
         e.setEmailAccount(account);
         e.setProviderMessageId(cut(providerId, 1000));
         e.setMessageIdHeader(cut(email.messageIdHeader(), 1000));
@@ -221,7 +235,7 @@ public class MailProcessingPipeline {
                 e.setNeedsReview(true);
                 saveSuggestions(e, match.suggestions());
                 ScoredMatch top = match.suggestions().get(0);
-                notificationService.create(NotificationType.POSSIBLE_DUPLICATE,
+                notificationService.create(e.getUserId(), NotificationType.POSSIBLE_DUPLICATE,
                         "Possible match — " + top.companyName(),
                         "\"" + cut(e.getSubject(), 120) + "\" may belong to " + top.companyName() + " – "
                                 + top.jobTitle() + ". Review it in the inbox.",
@@ -247,9 +261,10 @@ public class MailProcessingPipeline {
         }
         emailRepository.save(e);
 
-        events.publish(ServerEventPublisher.EMAIL_RECEIVED, mapper.toInboxItem(e));
+        events.publish(e.getUserId(), ServerEventPublisher.EMAIL_RECEIVED, mapper.toInboxItem(e));
         if (app != null) {
-            events.publish(created ? ServerEventPublisher.APPLICATION_CREATED : ServerEventPublisher.APPLICATION_UPDATED,
+            events.publish(e.getUserId(),
+                    created ? ServerEventPublisher.APPLICATION_CREATED : ServerEventPublisher.APPLICATION_UPDATED,
                     applicationService.summaries(List.of(app)).get(0));
         }
         return new ProcessingOutcome(ProcessingOutcome.Result.STORED, e.getId(), app == null ? null : app.getId(),
@@ -278,6 +293,7 @@ public class MailProcessingPipeline {
     private void saveSuggestions(EmailMessage e, List<ScoredMatch> suggestions) {
         for (ScoredMatch s : suggestions) {
             EmailMatchSuggestion ms = new EmailMatchSuggestion();
+            ms.setUserId(e.getUserId());
             ms.setEmailId(e.getId());
             ms.setApplicationId(s.applicationId());
             ms.setScore(s.score());
@@ -288,6 +304,7 @@ public class MailProcessingPipeline {
 
     private void logClassification(EmailMessage e, ClassificationResult cr, Actor actor) {
         EmailClassificationLog l = new EmailClassificationLog();
+        l.setUserId(e.getUserId());
         l.setEmailId(e.getId());
         l.setClassification(cr.classification());
         l.setConfidence(cr.confidence());

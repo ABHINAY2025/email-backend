@@ -10,12 +10,12 @@ import java.util.Optional;
 
 public interface NoteRepository extends MongoRepository<Note, Long> {
 
-    @Query(value = "{ 'applicationId': ?0 }", sort = "{ 'createdAt': -1, '_id': -1 }")
-    List<Note> findForApplication(Long appId);
+    @Query(value = "{ 'userId': ?0, 'applicationId': ?1 }", sort = "{ 'createdAt': -1, '_id': -1 }")
+    List<Note> findForApplication(Long userId, Long appId);
 
-    Optional<Note> findByIdAndApplicationId(Long id, Long applicationId);
+    Optional<Note> findByIdAndApplicationIdAndUserId(Long id, Long applicationId, Long userId);
 
-    @Query("{ 'applicationId': ?0 }")
-    @Update("{ '$set': { 'applicationId': ?1 } }")
-    long reassignApplication(Long sourceId, Long targetId);
+    @Query("{ 'userId': ?0, 'applicationId': ?1 }")
+    @Update("{ '$set': { 'applicationId': ?2 } }")
+    long reassignApplication(Long userId, Long sourceId, Long targetId);
 }

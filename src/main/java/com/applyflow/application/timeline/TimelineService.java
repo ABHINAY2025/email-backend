@@ -10,6 +10,7 @@ import com.applyflow.entity.EmailMessage;
 import com.applyflow.entity.JobApplication;
 import com.applyflow.mapper.DtoMapper;
 import com.applyflow.repository.ApplicationEventRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -37,16 +38,17 @@ public class TimelineService {
         this.mapper = mapper;
     }
 
-    /** Oldest first. */
+    /** Oldest first. The caller has checked that the application belongs to the current user. */
     @Transactional(readOnly = true)
     public List<TimelineEvent> timeline(Long applicationId) {
-        List<ApplicationEventEntity> events = repository.findTimeline(applicationId);
+        Long userId = CurrentUser.id();
+        List<ApplicationEventEntity> events = repository.findTimeline(userId, applicationId);
         // Subjects of the linked emails in one query (bodies are not loaded).
         List<Long> emailIds = events.stream().map(ApplicationEventEntity::getEmailId).filter(Objects::nonNull)
                 .distinct().toList();
         Map<Long, String> subjects = new HashMap<>();
         if (!emailIds.isEmpty()) {
-            Query q = Query.query(Criteria.where("_id").in(emailIds));
+            Query q = Query.query(Criteria.where("userId").is(userId).and("_id").in(emailIds));
             q.fields().include("subject");
             for (EmailMessage e : mongo.find(q, EmailMessage.class)) {
                 subjects.put(e.getId(), e.getSubject());

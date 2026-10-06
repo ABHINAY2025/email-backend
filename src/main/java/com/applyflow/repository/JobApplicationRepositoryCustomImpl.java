@@ -31,63 +31,64 @@ class JobApplicationRepositoryCustomImpl implements JobApplicationRepositoryCust
     }
 
     @Override
-    public Optional<JobApplication> findWithCompanyById(Long id) {
-        if (id == null) {
+    public Optional<JobApplication> findWithCompanyById(Long userId, Long id) {
+        if (id == null || userId == null) {
             return Optional.empty();
         }
-        JobApplication a = ops.findById(id, JobApplication.class);
+        JobApplication a = ops.findOne(query(where("_id").is(id).and("userId").is(userId)), JobApplication.class);
         return a == null ? Optional.empty() : Optional.of(refs.applications(List.of(a)).get(0));
     }
 
     @Override
-    public List<JobApplication> findAllWithCompanyByIdIn(Collection<Long> ids) {
+    public List<JobApplication> findAllWithCompanyByIdIn(Long userId, Collection<Long> ids) {
         if (ids.isEmpty()) {
             return List.of();
         }
-        return load(query(where("_id").in(ids)));
+        return load(query(where("userId").is(userId).and("_id").in(ids)));
     }
 
     @Override
-    public List<JobApplication> findAllWithCompany() {
-        return load(new Query());
+    public List<JobApplication> findAllWithCompany(Long userId) {
+        return load(query(where("userId").is(userId)));
     }
 
     @Override
-    public List<JobApplication> findAllActiveWithCompany() {
-        return load(query(where("archived").is(false)));
+    public List<JobApplication> findAllActiveWithCompany(Long userId) {
+        return load(query(where("userId").is(userId).and("archived").is(false)));
     }
 
     @Override
-    public List<JobApplication> findByCompanyIdWithCompany(Long companyId) {
-        return load(query(where("companyId").is(companyId)));
+    public List<JobApplication> findByCompanyIdWithCompany(Long userId, Long companyId) {
+        return load(query(where("userId").is(userId).and("companyId").is(companyId)));
     }
 
     @Override
-    public List<JobApplication> findByApplicationRef(String ref) {
+    public List<JobApplication> findByApplicationRef(Long userId, String ref) {
         if (ref == null) {
             return List.of();
         }
-        return load(query(where("applicationRef").regex("^" + Pattern.quote(ref) + "$", "i")));
+        return load(query(where("userId").is(userId).and("applicationRef").regex("^" + Pattern.quote(ref) + "$", "i")));
     }
 
     @Override
-    public List<JobApplication> findByJobUrl(String url) {
+    public List<JobApplication> findByJobUrl(Long userId, String url) {
         if (url == null) {
             return List.of();
         }
-        return load(query(where("jobUrl").is(url)));
+        return load(query(where("userId").is(userId).and("jobUrl").is(url)));
     }
 
     @Override
-    public List<JobApplication> findByCompanyIds(Collection<Long> companyIds) {
+    public List<JobApplication> findByCompanyIds(Long userId, Collection<Long> companyIds) {
         if (companyIds.isEmpty()) {
             return List.of();
         }
-        return load(query(where("companyId").in(companyIds)));
+        return load(query(where("userId").is(userId).and("companyId").in(companyIds)));
     }
 
     @Override
-    public Page<JobApplication> findPage(Criteria criteria, Pageable pageable, boolean sortByCompanyName) {
+    public Page<JobApplication> findPage(Long userId, Criteria filter, Pageable pageable, boolean sortByCompanyName) {
+        Criteria criteria = new Criteria().andOperator(where("userId").is(userId), filter);
         if (sortByCompanyName) {
             // Cross-collection sort: filter in MongoDB, sort by company name (then id) and page in memory.
             List<JobApplication> all = load(query(criteria));

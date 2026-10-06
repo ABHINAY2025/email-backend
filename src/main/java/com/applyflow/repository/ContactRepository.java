@@ -9,7 +9,7 @@ import java.util.Optional;
 public interface ContactRepository extends MongoRepository<Contact, Long> {
 
     /** Case-insensitive exact match (derived IgnoreCase queries use a quoted, anchored regex). */
-    Optional<Contact> findFirstByCompanyIdAndEmailIgnoreCase(Long companyId, String email);
+    Optional<Contact> findFirstByUserIdAndCompanyIdAndEmailIgnoreCase(Long userId, Long companyId, String email);
 
-    List<Contact> findByCompanyIdOrderByLastContactAtDesc(Long companyId);
+    List<Contact> findByUserIdAndCompanyIdOrderByLastContactAtDesc(Long userId, Long companyId);
 }

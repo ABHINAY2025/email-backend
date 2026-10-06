@@ -9,29 +9,29 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-/** Queries that return applications with their company and mailbox batch-loaded. */
+/** Owner-scoped queries that return applications with their company and mailbox batch-loaded. */
 public interface JobApplicationRepositoryCustom {
 
-    Optional<JobApplication> findWithCompanyById(Long id);
+    Optional<JobApplication> findWithCompanyById(Long userId, Long id);
 
-    List<JobApplication> findAllWithCompanyByIdIn(Collection<Long> ids);
+    List<JobApplication> findAllWithCompanyByIdIn(Long userId, Collection<Long> ids);
 
-    List<JobApplication> findAllWithCompany();
+    List<JobApplication> findAllWithCompany(Long userId);
 
-    List<JobApplication> findAllActiveWithCompany();
+    List<JobApplication> findAllActiveWithCompany(Long userId);
 
-    List<JobApplication> findByCompanyIdWithCompany(Long companyId);
+    List<JobApplication> findByCompanyIdWithCompany(Long userId, Long companyId);
 
     /** Case-insensitive exact match on the application reference. */
-    List<JobApplication> findByApplicationRef(String ref);
+    List<JobApplication> findByApplicationRef(Long userId, String ref);
 
-    List<JobApplication> findByJobUrl(String url);
+    List<JobApplication> findByJobUrl(Long userId, String url);
 
-    List<JobApplication> findByCompanyIds(Collection<Long> companyIds);
+    List<JobApplication> findByCompanyIds(Long userId, Collection<Long> companyIds);
 
     /**
      * Filtered page. {@code sortByCompanyName} sorts by the referenced company's name (done in memory, as a
      * cross-collection sort); otherwise the pageable's sort is applied by MongoDB.
      */
-    Page<JobApplication> findPage(Criteria criteria, Pageable pageable, boolean sortByCompanyName);
+    Page<JobApplication> findPage(Long userId, Criteria criteria, Pageable pageable, boolean sortByCompanyName);
 }

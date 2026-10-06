@@ -1,6 +1,6 @@
 package com.applyflow.entity;
 
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import com.applyflow.persistence.Refs;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -15,13 +15,16 @@ import java.util.Objects;
 
 /** Collection {@code contacts}. */
 @Document("contacts")
-@CompoundIndex(name = "uq_contacts_company_email", def = "{'companyId': 1, 'email': 1}", unique = true)
+@CompoundIndex(name = "uq_contacts_user_company_email", def = "{'userId': 1, 'companyId': 1, 'email': 1}", unique = true)
 @Getter
 @Setter
-public class Contact implements MongoEntity {
+public class Contact implements OwnedEntity {
 
     @Id
     private Long id;
+
+    /** Owner (users._id); every query is scoped by it. */
+    private Long userId;
 
     @Setter(AccessLevel.NONE)
     private Long companyId;
@@ -49,6 +52,7 @@ public class Contact implements MongoEntity {
     }
 
     public void setCompany(Company company) {
+        adoptOwner(company);
         this.company = company;
         this.companyId = company == null ? null : company.getId();
     }

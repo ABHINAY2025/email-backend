@@ -11,6 +11,7 @@ import com.applyflow.exception.BadRequestException;
 import com.applyflow.mapper.DtoMapper;
 import com.applyflow.repository.EmailMessageRepository;
 import com.applyflow.repository.JobApplicationRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,14 +45,15 @@ public class SearchService {
         }
         String needle = q.trim().toLowerCase(Locale.ROOT);
         Long id = ApplicationFilters.parseId(needle);
-        List<JobApplication> apps = applicationRepository.findAllWithCompany().stream()
+        Long userId = CurrentUser.id();
+        List<JobApplication> apps = applicationRepository.findAllWithCompany(userId).stream()
                 .filter(a -> matches(a, needle, id))
                 .sorted(Comparator.comparing(JobApplication::isArchived)
                         .thenComparing(JobApplication::getLastActivityAt, Comparator.nullsLast(Comparator.reverseOrder())))
                 .limit(8)
                 .toList();
         List<ApplicationSummary> summaries = applicationService.summaries(apps);
-        List<InboxItem> emails = emailRepository.search(needle, 6).stream()
+        List<InboxItem> emails = emailRepository.search(userId, needle, 6).stream()
                 .map(mapper::toInboxItem).toList();
         return new SearchResults(summaries, emails, companyQueryService.list(needle, 5));
     }

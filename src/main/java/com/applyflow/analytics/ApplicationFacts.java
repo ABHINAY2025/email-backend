@@ -8,6 +8,7 @@ import com.applyflow.repository.EmailMessageRepositoryCustom.LinkedEmailRow;
 import com.applyflow.repository.EmailMessageRepository;
 import com.applyflow.repository.JobApplicationRepository;
 import com.applyflow.repository.StatusHistoryRepository;
+import com.applyflow.security.CurrentUser;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -48,18 +49,20 @@ public class ApplicationFacts {
         }
     }
 
-    /** Facts for all non-archived applications. Must be called inside a transaction. */
+    /** Facts for all of the current user's non-archived applications. Must be called inside a transaction. */
     public List<Fact> load() {
-        return compute(applicationRepository.findAllActiveWithCompany());
+        return compute(applicationRepository.findAllActiveWithCompany(CurrentUser.id()));
     }
 
+    /** Facts for the given applications of the current user. */
     public List<Fact> compute(List<JobApplication> apps) {
+        Long userId = CurrentUser.id();
         Map<Long, List<StatusHistory>> history = new HashMap<>();
-        for (StatusHistory row : historyRepository.findAllRows()) {
+        for (StatusHistory row : historyRepository.findAllRows(userId)) {
             history.computeIfAbsent(row.getApplicationId(), k -> new ArrayList<>()).add(row);
         }
         Map<Long, List<LinkedEmailRow>> emails = new HashMap<>();
-        for (LinkedEmailRow row : emailRepository.findLinkedClassificationRows()) {
+        for (LinkedEmailRow row : emailRepository.findLinkedClassificationRows(userId)) {
             emails.computeIfAbsent(row.applicationId(), k -> new ArrayList<>()).add(row);
         }
         List<Fact> facts = new ArrayList<>(apps.size());

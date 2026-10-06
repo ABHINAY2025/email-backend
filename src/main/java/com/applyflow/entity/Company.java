@@ -1,26 +1,30 @@
 package com.applyflow.entity;
 
-import com.applyflow.persistence.MongoEntity;
+import com.applyflow.persistence.OwnedEntity;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
 
 /** Collection {@code companies}. */
 @Document("companies")
+@CompoundIndex(name = "uq_companies_user_normalized_name", def = "{'userId': 1, 'normalizedName': 1}", unique = true)
 @Getter
 @Setter
-public class Company implements MongoEntity {
+public class Company implements OwnedEntity {
 
     @Id
     private Long id;
 
+    /** Owner (users._id); every query is scoped by it. */
+    private Long userId;
+
     private String name;
 
-    @Indexed(unique = true, name = "uq_companies_normalized_name")
     private String normalizedName;
 
     @Indexed(name = "idx_companies_domain")

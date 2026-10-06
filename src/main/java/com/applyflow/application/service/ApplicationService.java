@@ -33,6 +33,7 @@ import com.applyflow.repository.NoteRepository;
 import com.applyflow.repository.NotificationRepository;
 import com.applyflow.repository.StatusHistoryRepository;
 import com.applyflow.repository.ApplicationEventRepository;
+import com.applyflow.security.CurrentUser;
 import com.applyflow.sse.ServerEventPublisher;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.applyflow.persistence.CascadeDeleter;
@@ -123,8 +124,9 @@ public class ApplicationService {
         boolean byCompany = "company.name".equals(property);
         Sort sort = byCompany ? Sort.by(new Sort.Order(dir, "_id"))
                 : Sort.by(new Sort.Order(dir, property), new Sort.Order(dir, "_id"));
-        Page<JobApplication> result = applicationRepository.findPage(ApplicationFilters.build(f, zone, mongo),
-                PageRequest.of(page, size, sort), byCompany);
+        Long userId = CurrentUser.id();
+        Page<JobApplication> result = applicationRepository.findPage(userId,
+                ApplicationFilters.build(userId, f, zone, mongo), PageRequest.of(page, size, sort), byCompany);
         return PageResponse.of(result, summaries(result.getContent()));
     }
 
@@ -139,7 +141,7 @@ public class ApplicationService {
         if (ids.isEmpty()) {
             return new HashMap<>();
         }
-        return emailRepository.countByApplicationIds(ids);
+        return emailRepository.countByApplicationIds(CurrentUser.id(), ids);
     }
 
     @Transactional(readOnly = true)
@@ -155,14 +157,14 @@ public class ApplicationService {
 
     public ApplicationDetail detail(JobApplication a) {
         long count = emailCounts(List.of(a.getId())).getOrDefault(a.getId(), 0L);
-        return mapper.toDetail(a, count, noteRepository.findForApplication(a.getId()),
-                historyRepository.findForApplication(a.getId()));
+        return mapper.toDetail(a, count, noteRepository.findForApplication(a.getUserId(), a.getId()),
+                historyRepository.findForApplication(a.getUserId(), a.getId()));
     }
 
     @Transactional(readOnly = true)
     public List<EmailDetail> emails(Long id) {
-        load(id);
-        return emailRepository.findByApplicationIdOrdered(id).stream()
+        JobApplication a = load(id);
+        return emailRepository.findByApplicationIdOrdered(a.getUserId(), id).stream()
                 .map(e -> mapper.toEmailDetail(e, e.isNeedsReview() ? suggestionRepository.findForEmail(e.getId())
                         : List.of()))
                 .toList();
@@ -170,13 +172,14 @@ public class ApplicationService {
 
     @Transactional(readOnly = true)
     public List<StatusHistoryEntry> history(Long id) {
-        load(id);
-        return historyRepository.findForApplication(id).stream().map(mapper::toHistory).toList();
+        JobApplication a = load(id);
+        return historyRepository.findForApplication(a.getUserId(), id).stream().map(mapper::toHistory).toList();
     }
 
     @Transactional(readOnly = true)
     public ApplicationFacets facets() {
-        List<JobApplication> apps = applicationRepository.findAllWithCompany();
+        Long userId = CurrentUser.id();
+        List<JobApplication> apps = applicationRepository.findAllWithCompany(userId);
         Map<Long, String> companies = new LinkedHashMap<>();
         TreeSet<String> locations = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         TreeSet<String> sources = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
@@ -192,7 +195,7 @@ public class ApplicationService {
         List<IdName> companyList = companies.entrySet().stream()
                 .map(e -> new IdName(e.getKey(), e.getValue()))
                 .sorted((x, y) -> x.name().compareToIgnoreCase(y.name())).toList();
-        List<IdEmail> accounts = accountRepository.findAllByOrderByCreatedAtAsc().stream()
+        List<IdEmail> accounts = accountRepository.findByUserIdOrderByCreatedAtAsc(userId).stream()
                 .map(a -> new IdEmail(a.getId(), a.getEmail())).toList();
         return new ApplicationFacets(companyList, List.copyOf(locations), List.copyOf(sources), accounts);
     }
@@ -201,13 +204,15 @@ public class ApplicationService {
 
     @Transactional
     public ApplicationDetail create(CreateApplicationRequest req) {
-        Company company = companyService.findOrCreate(req.companyName(), null, false);
+        Long userId = CurrentUser.id();
+        Company company = companyService.findOrCreate(userId, req.companyName(), null, false);
         Instant appliedAt = req.appliedAt() == null ? clock.instant()
                 : req.appliedAt().atStartOfDay(zone).toInstant().plusSeconds(12 * 3600);
         if (appliedAt.isAfter(clock.instant())) {
             appliedAt = clock.instant();
         }
         JobApplication a = new JobApplication();
+        a.setUserId(userId);
         a.setCompany(company);
         a.setJobTitle(req.jobTitle().trim());
         a.setNormalizedTitle(TitleExtractor.normalize(req.jobTitle()));
@@ -231,7 +236,7 @@ public class ApplicationService {
             noteRepository.save(n);
         }
         ApplicationDetail detail = detail(a);
-        events.publish(ServerEventPublisher.APPLICATION_CREATED, mapper.toSummary(a, 0));
+        events.publish(a.getUserId(), ServerEventPublisher.APPLICATION_CREATED, mapper.toSummary(a, 0));
         return detail;
     }
 
@@ -248,7 +253,7 @@ public class ApplicationService {
             if (v == null || v.isBlank() || v.length() > 255) {
                 errors.put("companyName", "must not be blank");
             } else if (!v.trim().equalsIgnoreCase(a.getCompany().getName())) {
-                a.setCompany(companyService.findOrCreate(v, null, false));
+                a.setCompany(companyService.findOrCreate(a.getUserId(), v, null, false));
             }
         }
         if (body.has("jobTitle")) {
@@ -324,14 +329,15 @@ public class ApplicationService {
         }
         applicationRepository.save(a);
         ApplicationDetail detail = detail(a);
-        events.publish(ServerEventPublisher.APPLICATION_UPDATED, mapper.toSummary(a, detail.emailCount()));
+        events.publish(a.getUserId(), ServerEventPublisher.APPLICATION_UPDATED,
+                mapper.toSummary(a, detail.emailCount()));
         return detail;
     }
 
     @Transactional
     public void delete(Long id) {
         JobApplication a = load(id);
-        emailRepository.deleteByApplicationId(id);
+        emailRepository.deleteByApplicationId(a.getUserId(), id);
         cascade.deleteApplication(a.getId());
     }
 
@@ -342,7 +348,8 @@ public class ApplicationService {
         a.setNeedsReview(false);
         applicationRepository.save(a);
         ApplicationDetail detail = detail(a);
-        events.publish(ServerEventPublisher.APPLICATION_UPDATED, mapper.toSummary(a, detail.emailCount()));
+        events.publish(a.getUserId(), ServerEventPublisher.APPLICATION_UPDATED,
+                mapper.toSummary(a, detail.emailCount()));
         return detail;
     }
 
@@ -355,11 +362,12 @@ public class ApplicationService {
         JobApplication source = load(sourceId);
         String sourceLabel = source.displayId() + " (" + source.getCompany().getName() + " – " + source.getJobTitle() + ")";
 
-        emailRepository.reassignApplication(source.getId(), target.getId());
-        eventRepository.reassignApplication(source.getId(), target.getId());
-        noteRepository.reassignApplication(source.getId(), target.getId());
-        historyRepository.reassignApplication(source.getId(), target.getId());
-        notificationRepository.reassignApplication(source.getId(), target.getId());
+        Long userId = target.getUserId(); // both were loaded for the current user (404 otherwise)
+        emailRepository.reassignApplication(userId, source.getId(), target.getId());
+        eventRepository.reassignApplication(userId, source.getId(), target.getId());
+        noteRepository.reassignApplication(userId, source.getId(), target.getId());
+        historyRepository.reassignApplication(userId, source.getId(), target.getId());
+        notificationRepository.reassignApplication(userId, source.getId(), target.getId());
         suggestionRepository.deleteForApplication(source.getId());
 
         fillIfNull(target, source);
@@ -376,7 +384,8 @@ public class ApplicationService {
         target.touchActivity(clock.instant());
         applicationRepository.save(target);
         ApplicationDetail detail = detail(target);
-        events.publish(ServerEventPublisher.APPLICATION_UPDATED, mapper.toSummary(target, detail.emailCount()));
+        events.publish(target.getUserId(), ServerEventPublisher.APPLICATION_UPDATED,
+                mapper.toSummary(target, detail.emailCount()));
         return detail;
     }
 
@@ -399,7 +408,7 @@ public class ApplicationService {
 
     @Transactional
     public NoteDto updateNote(Long appId, Long noteId, String content) {
-        Note n = noteRepository.findByIdAndApplicationId(noteId, appId)
+        Note n = noteRepository.findByIdAndApplicationIdAndUserId(noteId, appId, CurrentUser.id())
                 .orElseThrow(() -> NotFoundException.of("Note", noteId));
         n.setContent(content.trim());
         n.setUpdatedAt(clock.instant());
@@ -409,7 +418,7 @@ public class ApplicationService {
 
     @Transactional
     public void deleteNote(Long appId, Long noteId) {
-        Note n = noteRepository.findByIdAndApplicationId(noteId, appId)
+        Note n = noteRepository.findByIdAndApplicationIdAndUserId(noteId, appId, CurrentUser.id())
                 .orElseThrow(() -> NotFoundException.of("Note", noteId));
         noteRepository.delete(n);
     }
@@ -421,9 +430,11 @@ public class ApplicationService {
     public JobApplication createFromEmail(String companyName, String companyDomain, String jobTitle,
                                           ApplicationStatus status, Instant appliedAt, String source,
                                           EmailAccount account, boolean demo) {
-        Company company = companyService.findOrCreate(companyName, companyDomain, demo);
+        Long userId = account != null && account.getUserId() != null ? account.getUserId() : CurrentUser.id();
+        Company company = companyService.findOrCreate(userId, companyName, companyDomain, demo);
         String title = jobTitle == null || jobTitle.isBlank() ? "Unknown position" : jobTitle.trim();
         JobApplication a = new JobApplication();
+        a.setUserId(userId);
         a.setCompany(company);
         a.setEmailAccount(account);
         a.setJobTitle(title.length() > 500 ? title.substring(0, 500) : title);
@@ -444,13 +455,15 @@ public class ApplicationService {
                 "Reclassified email: " + email.getSubject(), email.getId(), 1.0, clock.instant(), true);
         if (change != null) {
             applicationRepository.save(app);
-            events.publish(ServerEventPublisher.APPLICATION_UPDATED, summaries(List.of(app)).get(0));
+            events.publish(app.getUserId(), ServerEventPublisher.APPLICATION_UPDATED,
+                    summaries(List.of(app)).get(0));
         }
         return change != null;
     }
 
     public JobApplication load(Long id) {
-        return applicationRepository.findWithCompanyById(id)
+        // Another user's id behaves exactly like a non-existent one (404).
+        return applicationRepository.findWithCompanyById(CurrentUser.id(), id)
                 .orElseThrow(() -> NotFoundException.of("Application", id));
     }
 

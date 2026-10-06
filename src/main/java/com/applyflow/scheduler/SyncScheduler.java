@@ -5,6 +5,7 @@ import com.applyflow.config.AppProperties;
 import com.applyflow.entity.EmailAccount;
 import com.applyflow.entity.SyncJob;
 import com.applyflow.repository.SyncJobRepository;
+import com.applyflow.security.CurrentUser;
 import com.applyflow.exception.ApiException;
 import com.applyflow.repository.EmailAccountRepository;
 import com.applyflow.service.SettingsService;
@@ -16,6 +17,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Periodic sync: a 1-minute tick checks each enabled, non-demo account against the current
@@ -49,12 +52,15 @@ public class SyncScheduler {
             return;
         }
         try {
-            Duration interval = Duration.ofMinutes(Math.max(1, settingsService.current().syncIntervalMinutes()));
             Instant now = Instant.now();
+            // Every enabled mailbox of every user, each on its owner's sync interval.
+            Map<Long, Duration> intervals = new HashMap<>();
             for (EmailAccount a : accountRepository.findAllByOrderByCreatedAtAsc()) {
-                if (!a.isEnabled() || a.isDemo() || syncService.isRunning(a.getId())) {
+                if (!a.isEnabled() || a.isDemo() || a.getUserId() == null || syncService.isRunning(a.getId())) {
                     continue;
                 }
+                Duration interval = intervals.computeIfAbsent(a.getUserId(), uid -> Duration.ofMinutes(
+                        Math.max(1, settingsService.forUser(uid).syncIntervalMinutes())));
                 Duration wait = a.getSyncStatus() == SyncStatus.ERROR && interval.compareTo(ERROR_BACKOFF) < 0
                         ? ERROR_BACKOFF : interval;
                 // Leave a little slack so a 5-minute interval does not drift to 6 minutes with a 1-minute tick.
@@ -66,7 +72,7 @@ public class SyncScheduler {
                 }
                 if (lastAttempt == null || lastAttempt.plus(wait).minusSeconds(30).isBefore(now)) {
                     try {
-                        syncService.start(a.getId());
+                        CurrentUser.runAs(a.getUserId(), () -> syncService.start(a.getId()));
                     } catch (ApiException e) {
                         log.debug("Scheduled sync skipped for account {}: {}", a.getId(), e.getCode());
                     }

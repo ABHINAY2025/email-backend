@@ -62,6 +62,8 @@ app:
     password: ${APP_PASSWORD:applyflow}
     display-name: ${APP_DISPLAY_NAME:Abhinay}
     session-secret: ${SESSION_SECRET:dev-session-secret-change-me}
+    # Self-service sign-up (POST /api/auth/register). Set REGISTRATION_ENABLED=false to close registration.
+    registration-enabled: ${REGISTRATION_ENABLED:true}
   encryption:
     key: ${APP_ENCRYPTION_KEY:dev-only-encryption-key-change-me}
   seed:

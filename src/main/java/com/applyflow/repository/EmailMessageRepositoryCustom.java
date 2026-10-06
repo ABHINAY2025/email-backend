@@ -11,47 +11,48 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-/** Email queries; list results have their application (with company) and mailbox batch-loaded. */
+/** Email queries, all scoped to one owner; list results have their application (with company) and mailbox batch-loaded. */
 public interface EmailMessageRepositoryCustom {
 
     /** Rows used by analytics. */
     record LinkedEmailRow(Long applicationId, EmailClassification classification, Instant receivedAt) {
     }
 
-    Page<EmailMessage> findPage(Criteria criteria, Pageable pageable);
+    /** The owner filter is always added to {@code criteria}. */
+    Page<EmailMessage> findPage(Long userId, Criteria criteria, Pageable pageable);
 
     /** Emails already linked to an application that belong to the same conversation, newest first. */
-    List<EmailMessage> findLinkedInThread(Collection<String> messageIds, String threadId);
+    List<EmailMessage> findLinkedInThread(Long userId, Collection<String> messageIds, String threadId);
 
-    List<EmailMessage> findByApplicationIdOrdered(Long appId);
+    List<EmailMessage> findByApplicationIdOrdered(Long userId, Long appId);
 
     /** Job-email count per application id. */
-    Map<Long, Long> countByApplicationIds(Collection<Long> ids);
+    Map<Long, Long> countByApplicationIds(Long userId, Collection<Long> ids);
 
-    List<LinkedEmailRow> findLinkedClassificationRows();
+    List<LinkedEmailRow> findLinkedClassificationRows(Long userId);
 
-    Map<EmailClassification, Long> countByClassification();
+    Map<EmailClassification, Long> countByClassification(Long userId);
 
-    List<EmailMessage> findUnreadActionRequired();
+    List<EmailMessage> findUnreadActionRequired(Long userId);
 
-    List<EmailMessage> findNeedsReview();
+    List<EmailMessage> findNeedsReview(Long userId);
 
     /** Job emails of the company's applications, or unlinked ones whose detected company has that name. */
-    List<EmailMessage> findForCompany(Long companyId, String companyName, int limit);
+    List<EmailMessage> findForCompany(Long userId, Long companyId, String companyName, int limit);
 
     /** Job-email count per lower-cased sender for the company's applications. */
-    Map<String, Long> countBySenderForCompany(Long companyId);
+    Map<String, Long> countBySenderForCompany(Long userId, Long companyId);
 
-    long countForCompany(Long companyId);
+    long countForCompany(Long userId, Long companyId);
 
     /** Case-insensitive "contains" search over subject / sender; newest first. */
-    List<EmailMessage> search(String needle, int limit);
+    List<EmailMessage> search(Long userId, String needle, int limit);
 
-    long deleteByApplicationId(Long appId);
+    long deleteByApplicationId(Long userId, Long appId);
 
-    long deleteByAccountId(Long accountId);
+    long deleteByAccountId(Long userId, Long accountId);
 
-    long deleteDemo();
+    long deleteDemo(Long userId);
 
-    long deleteAllBulk();
+    long deleteAllBulk(Long userId);
 }
