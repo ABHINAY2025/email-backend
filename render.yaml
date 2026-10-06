@@ -1,0 +1,31 @@
+# Render Blueprint for the ApplyFlow backend (Docker web service).
+# Values marked `sync: false` are secrets you enter in the Render dashboard; they are never committed.
+services:
+  - type: web
+    name: applyflow-backend
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DATABASE
+        value: applyflow
+      # Must equal the key used when the mailboxes were connected, or stored app passwords can't be decrypted.
+      - key: APP_ENCRYPTION_KEY
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: APP_USERNAME
+        value: admin
+      - key: APP_PASSWORD
+        sync: false
+      - key: APP_DISPLAY_NAME
+        value: Abhinay
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: SEED_DATA
+        value: "false"
+      - key: CORS_ORIGINS
+        value: http://localhost:5173
