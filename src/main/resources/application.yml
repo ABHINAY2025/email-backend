@@ -1,0 +1,84 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    whitelabel:
+      enabled: false
+  servlet:
+    session:
+      timeout: 7d
+      cookie:
+        http-only: true
+        same-site: lax
+        name: JSESSIONID
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: applyflow
+  # Load KEY=VALUE pairs from a .env file (project root when run from backend/, or the working dir).
+  # Real environment variables still take precedence.
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:.env[.properties]
+  data:
+    mongodb:
+      # MongoDB connection string (e.g. Atlas mongodb+srv://...). The database below always wins over any
+      # database named in the URI, so ApplyFlow only ever reads/writes its own database.
+      uri: ${MONGO_URI:mongodb://localhost:27017/applyflow}
+      database: ${MONGO_DATABASE:applyflow}
+      # Collections and indexes are created explicitly at startup (MongoSchemaInitializer).
+      auto-index-creation: false
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: UTC
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  mvc:
+    async:
+      request-timeout: -1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  version: @project.version@
+  timezone: ${APP_TIMEZONE:Asia/Kolkata}
+  security:
+    username: ${APP_USERNAME:admin}
+    password: ${APP_PASSWORD:applyflow}
+    display-name: ${APP_DISPLAY_NAME:Abhinay}
+    session-secret: ${SESSION_SECRET:dev-session-secret-change-me}
+  encryption:
+    key: ${APP_ENCRYPTION_KEY:dev-only-encryption-key-change-me}
+  seed:
+    enabled: ${SEED_DATA:true}
+  sync:
+    enabled: ${SYNC_ENABLED:true}
+    batch-size: 50
+    max-body-bytes: 204800
+    executor-threads: 3
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://localhost:3000}
+  intelligence:
+    provider: ${INTELLIGENCE_PROVIDER:rules}
+
+logging:
+  level:
+    root: INFO
+    com.applyflow: INFO
+    org.mongodb.driver: WARN
+    org.eclipse.angus.mail: WARN
