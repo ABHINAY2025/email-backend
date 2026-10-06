@@ -28,4 +28,4 @@ services:
       - key: SEED_DATA
         value: "false"
       - key: CORS_ORIGINS
-        value: http://localhost:5173
+        value: https://email-frontend-coral-five.vercel.app,http://localhost:5173
